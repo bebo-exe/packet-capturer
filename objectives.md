@@ -5,7 +5,7 @@
 - have a filter system to filter the captured packets by protocol, source, destination, etc
 - have a statistics page to show the number of captured packets, the most common protocols, the most common source and destination, etc
 - improved code structure and organization such that it is able to perform more like a real packet analyzer platform and be more efficient in capturing and analyzing packets (E.X wireshark)
-- include udp, arp and icmp in the gui interface
+- include udp, arp, icmp and http/s in the gui interface
 - have details when the packet gets captured (its number, source, destination, info)
 - an option to save the captured packets in a pcap file
 - these saved pcap files are saved in a directory called "capturs"
