@@ -3,6 +3,7 @@
 - only udp and arp packets are being captured and displayed, other protocol packets arent (tcp, icmp, http/s maybe?, dns)/ improper capturing #critical/ most important issue to fix
   
 possible causes (may be correct and may be not, just some guesses):
+
 ** first, a file named "packet_capturer_Version2.py" that works correctly and captures all packets, including tcp, udp, arp, icmp, etc. was created as a separate script to test the packet capturing logic and ensure that it is working properly. This file uses a simple sniff approach without any complex filtering or interface mapping, which may be why it captures all packets correctly.
 ** use this file as a reference to compare with the capture logic in "templates/app.py" and identify any differences or issues that may be causing the problem with missing packets. as for the possible causes its as follows:
 * using elif (?) instead of if statements in the packet processing code, which may cause some packets to be skipped if they match multiple conditions (e.g. a packet that is both UDP and ARP may only be processed as UDP and not ARP, or vice versa)
