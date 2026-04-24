@@ -11,6 +11,10 @@ possible causes (may be correct and may be not, just some guesses):
 * sniff parameters?, (lines 640-647): Uses stop_filter=lambda x: not is_capturing without a count - could prevent packets from being delivered properly
 * environmental routing/firewall issue? if the computer running the capture has some routing or firewall rules that are preventing certain types of packets from being captured or processed correctly, this could also result in missing packets in the stats. #unlikely since packet_capturer_Version2.py isnt effected, but still worth checking if other solutions dont work.
 * if so, would wireshark show the same issue? if wireshark also shows missing packets, then it is likely an environmental issue with the network configuration or firewall rules. if wireshark captures all packets correctly, then it is more likely an issue with the code in templates/app.py that needs to be addressed. (but wireshark does work correctly, so it is more likely an issue with the code in templates/app.py that needs to be addressed) #important step for troubleshooting and identifying the root cause of the issue with missing packets.
+* since packet_capturer_Version2.py and wireshark botth capture all packets correctly. copilot analysis could be wrong with the issue being environmental/ firewall related since both app.py and packet_capturer_Version2.py both using scapy on the same wi-fi interface, it caught a key difference is that version2 accepts a filter paramter (which the note says works with filter="ip") while app.py has no filter and in concluded that the issues is likely as follows:
+    * windows npacp requiers explixit BPF filters to reliably deliver certain packet types
+    * version2 works because it can accept filer="ip" from the command line
+    * app.py fails because its not using the proper filter
 * after copilot tested with multiple approuches (changing timeouts, filters, sniff parameters) the application is consistanly captures arp but never captures tcp/icmp/dns from the test traffic and it indicated that:
     * sniff () is working correctly - arp packets proven consistantly captured
     * interface mapping is correct - captures from the right interface
@@ -27,6 +31,7 @@ some possible solutions? (could not be correct, just some guesses):
 * Align templates/app.py's capture logic with packet_capturer_Version2.py:
     * Use the same simple sniff approach without stop_filter
     * Or use direct Scapy interface names instead of friendly name mapping
+* copilot concluded that the solution isnt to debug network routing, but to add a configurable BPF filter parameter to app.py and use filter="ip or arp" to capture all protocol types just like version2 does
 - once going to the broswer after starting app.py, this message is contuined to be printed in the powershell: 
     ```INFO:werkzeug:127.0.0.1 - - [22/Apr/2026 17:53:59] "GET /api/stats HTTP/1.1" 200 -``` which can be annoying, but it is just the flask server logging the request to the /api/stats endpoint, which is expected behavior when the browser makes a request to that endpoint to fetch the stats data. (can it be disabled? maybe, but it is not a critical issue and can be ignored for now) #ingnorable/ minor issue
 - it can be easy to mix up which URL to use when accessing the web interface, and it is needed to update "how_to_run.md" to make it more clear when to use each URL #medium issue/ not so critical but can cause confusion for users, so it should be clarified in the instructions.
