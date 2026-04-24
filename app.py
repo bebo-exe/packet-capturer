@@ -596,6 +596,11 @@ def start_capture_api():
         count = int(data.get('count', 0)) if data.get('count') is not None else 0
         save_pcap = bool(data.get('save_pcap', False))
         requested_pcap_name = data.get('pcap_filename', '').strip()
+        bpf_filter = data.get('filter', '').strip()
+        
+        # Use default BPF filter if not provided (required for Windows/NPCap)
+        if not bpf_filter:
+            bpf_filter = 'ip or arp'
 
         if not interface:
             return jsonify({'success': False, 'error': 'No interface selected'}), 400
@@ -635,8 +640,9 @@ def start_capture_api():
             global is_capturing, pcap_writer
             print(f"[DEBUG] capture_packets() thread started. is_capturing={is_capturing}")
             try:
-                logger.info(f"Starting packet capture on {iface_info['friendly_name']} ({scapy_iface})")
+                logger.info(f"Starting packet capture on {iface_info['friendly_name']} ({scapy_iface}) with filter='{bpf_filter}'")
                 print(f"[DEBUG] Beginning sniff on interface: {scapy_iface}")
+                print(f"[DEBUG] BPF Filter: {bpf_filter}")
                 print(f"[DEBUG] Interface type: {type(scapy_iface)}, Interface value: {repr(scapy_iface)}")
 
                 def packet_callback(pkt):
@@ -658,15 +664,17 @@ def start_capture_api():
                         print(f"[DEBUG] Exception in packet_callback: {e}")
 
                 print("[DEBUG] About to start sniff...")
-                # Use single sniff() call - NO FILTER to capture ALL packets including ARP
+                # Use single sniff() call with mandatory BPF filter
+                # Required for Windows/NPCap to deliver all packet types (TCP, ICMP, DNS, etc)
                 # timeout=10 allows time for test traffic to arrive
                 
                 try:
                     sniff_count = count if count > 0 else 0
-                    print(f"[DEBUG] Starting sniff (NO FILTER), count={sniff_count}, timeout=10s")
+                    print(f"[DEBUG] Starting sniff with filter='{bpf_filter}', count={sniff_count}, timeout=10s")
                     sniff(
                         iface=scapy_iface,
                         prn=packet_callback,
+                        filter=bpf_filter,
                         store=False,
                         timeout=10  # Wait up to 10 seconds for packets
                     )
@@ -980,6 +988,11 @@ def run_ruleset():
     count = int(data.get('count', 3000))
     save_pcap = bool(data.get('save_pcap', False))
     requested_pcap_name = data.get('pcap_filename', '').strip()
+    bpf_filter = data.get('filter', '').strip()
+    
+    # Use default BPF filter if not provided (required for Windows/NPCap)
+    if not bpf_filter:
+        bpf_filter = 'ip or arp'
 
     if not interface:
         return jsonify({'success': False, 'error': 'No interface specified'}), 400
@@ -992,7 +1005,7 @@ def run_ruleset():
         captured.append(pkt)
 
     try:
-        sniff(iface=scapy_iface, prn=_cb, count=count, store=False)
+        sniff(iface=scapy_iface, prn=_cb, filter=bpf_filter, count=count, store=False)
     except Exception as e:
         return jsonify({'success': False, 'error': f'Capture failed: {e}'}), 500
 
