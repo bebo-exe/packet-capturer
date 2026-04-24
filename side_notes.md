@@ -1,4 +1,4 @@
-## some important notes to point out:   
+# some important notes to point out:   
 
 - only udp and arp packets are being captured and displayed, other protocol packets arent (tcp, icmp, http/s maybe?, dns)/ improper capturing #critical/ most important issue to fix
   
@@ -32,6 +32,8 @@ possible causes (may be correct and may be not, just some guesses):
   
 **important note for this issue:- 
 the platform can work perfectly fine on linux, and it can normally capture tcp, icmp and http/s, meaning its very much likely the BPF filter that needs proper configuring
+    * even after configuring the BPF filter, it still resists capturing tcp, icmp and http/s packets, which may indicate that there is an issue with how the filter is being applied or with the capture library itself on windows (e.g. npcap) and it may require further investigation or testing to determine the root cause of the issue and find a solution for it. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
+    * while it still works perfectly fine on linux because it uses libpcap which handles the BPF filters in its own way and may not have the same limitations as npcap on windows, which is why it is able to capture all packets correctly without needing any special configuration for the BPF filters. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
 
 some possible solutions? (could not be correct, just some guesses):
 * Align templates/app.py's capture logic with packet_capturer_Version2.py:
@@ -39,8 +41,11 @@ some possible solutions? (could not be correct, just some guesses):
     * Or use direct Scapy interface names instead of friendly name mapping
 * copilot concluded that the solution isnt to debug network routing, but to add a configurable BPF filter parameter to app.py and use filter="ip or arp" to capture all protocol types just like version2 does
 * if npcap is the issue would installing winpcap and make the project work with it instead solve it?
-- once going to the broswer after starting app.py, this message is contuined to be printed in the powershell: 
+* is it possible to configure npcap' BPF filter to match how lipcap handles it on linux, or is it a fundamental limitation of npcap on windows that cannot be overcome with configuration? #important question for finding a solution for the issue with missing packets on windows.
+* or maybe configure npcap to match how it works for version2, since version2 works correctly on windows, it may be possible to configure npcap in a similar way to how it is configured for version2 to achieve the same results and capture all packets correctly. #important question for finding a solution for the issue with missing packets on windows.
+- [fixed] once going to the broswer after starting app.py, this message is contuined to be printed in the powershell: 
     ```INFO:werkzeug:127.0.0.1 - - [22/Apr/2026 17:53:59] "GET /api/stats HTTP/1.1" 200 -``` which can be annoying, but it is just the flask server logging the request to the /api/stats endpoint, which is expected behavior when the browser makes a request to that endpoint to fetch the stats data. (can it be disabled? maybe, but it is not a critical issue and can be ignored for now) #ingnorable/ minor issue
 - it can be easy to mix up which URL to use when accessing the web interface, and it is needed to update "how_to_run.md" to make it more clear when to use each URL #medium issue/ not so critical but can cause confusion for users, so it should be clarified in the instructions.
 - the "how_to_run.md" file should also be updated to include instructions on how to access the web interface from another computer on the same network, as well as troubleshooting tips for common issues that may arise when trying to access the web interface. #not too minor issue/ can be easily fixed by adding a section in the instructions for troubleshooting and accessing from other devices, which can improve the user experience and make it easier for users to get started with the project.
 - local host IP addresses change depending on the computer (?) if published and used by other users/ other computers, if so, it should be noted in the instructions that the user should check the output of the Flask server to see which URL to use when accessing the web interface, as it may differ based on the network configuration of the computer running the server. #medium issue/ not so critical but can cause confusion for users, so it should be clarified in the instructions.
+- packet capturing stops by itself before the user presses stop because it has a timeout and needs to be removed
