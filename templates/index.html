@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Packet Analyzer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #0f3460;
+        }
+        
+        .header h1 {
+            color: #00ff88;
+            font-size: 2.5em;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        .controls {
+            background: #0f3460;
+            border: 1px solid #00ff88;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .control-group label {
+            font-size: 0.85em;
+            color: #00ff88;
+            margin-bottom: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .control-group select,
+        .control-group input {
+            padding: 10px;
+            background: #16213e;
+            border: 1px solid #00ff88;
+            color: #e0e0e0;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+        
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+            border-color: #00ff88;
+        }
+        
+        .control-group select option {
+            background: #16213e;
+            color: #e0e0e0;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            grid-column: 3;
+            justify-content: flex-end;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%);
+            border: none;
+            color: #0f3460;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 255, 136, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button.stop {
+            background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+            color: white;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: #0f3460;
+            border: 1px solid #00ff88;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-card .value {
+            font-size: 2em;
+            color: #00ff88;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .stat-card .label {
+            font-size: 0.8em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .panel {
+            background: #0f3460;
+            border: 1px solid #00ff88;
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel h3 {
+            color: #00ff88;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .packet-list {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #16213e;
+            border-radius: 4px;
+            max-height: 400px;
+        }
+        
+        .packet-item {
+            padding: 10px;
+            border-bottom: 1px solid #16213e;
+            font-size: 0.85em;
+            font-family: 'Courier New', monospace;
+            color: #00ff88;
+            word-break: break-all;
+        }
+        
+        .packet-item:last-child {
+            border-bottom: none;
+        }
+        
+        .packet-item.tcp {
+            border-left: 3px solid #ff9800;
+        }
+        
+        .packet-item.udp {
+            border-left: 3px solid #2196f3;
+        }
+        
+        .packet-item.dns {
+            border-left: 3px solid #4caf50;
+        }
+        
+        .packet-item.arp {
+            border-left: 3px solid #9c27b0;
+        }
+        
+        .packet-item.http {
+            border-left: 3px solid #ff5722;
+        }
+        
+        .packet-item.https {
+            border-left: 3px solid #00bcd4;
+        }
+        
+        .packet-item.icmp {
+            border-left: 3px solid #673ab7;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background: #666;
+            animation: none;
+        }
+        
+        .status-indicator.active {
+            background: #00ff88;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .empty-message {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            font-style: italic;
+        }
+        
+        .error {
+            background: #c00;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: none;
+        }
+        
+        .error.show {
+            display: block;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #16213e;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #00ff88;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00cc66;
+        }
+        
+        .ruleset-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .ruleset-table th,
+        .ruleset-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #0f3460;
+        }
+        
+        .ruleset-table th {
+            background: #16213e;
+            color: #00ff88;
+            font-weight: 600;
+        }
+        
+        .ruleset-table td {
+            color: #e0e0e0;
+        }
+        
+        .ruleset-table tr:hover {
+            background: #16213e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 Packet Analyzer</h1>
+            <p>Real-time Network Traffic Monitor</p>
+        </div>
+        
+        <div class="error" id="error-message"></div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="interface-select">Network Interface</label>
+                <select id="interface-select">
+                    <option value="">Loading interfaces...</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="packet-count">Packets to Capture</label>
+                <input type="number" id="packet-count" value="100" min="1" max="10000">
+            </div>
+
+            <div class="control-group">
+                <label for="save-pcap">Save to PCAP</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="checkbox" id="save-pcap">
+                    <input type="text" id="pcap-filename" placeholder="capture.pcap" style="flex:1;">
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button id="start-btn" onclick="startCapture()">▶ Start</button>
+                <button id="stop-btn" class="stop" onclick="stopCapture()" disabled>⏹ Stop</button>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Total Packets</div>
+                <div class="value" id="total-packets">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">TCP Packets</div>
+                <div class="value" id="tcp-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">DNS Packets</div>
+                <div class="value" id="dns-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">UDP Packets</div>
+                <div class="value" id="udp-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">ARP Packets</div>
+                <div class="value" id="arp-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">ICMP Packets</div>
+                <div class="value" id="icmp-count">0</div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="panel">
+                <h3><span class="status-indicator" id="status"></span>Live Packets</h3>
+                <div class="packet-list" id="packet-list">
+                    <div class="empty-message">Waiting for packets...</div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h3>Capture Details</h3>
+                <div id="capture-details" style="font-size: 0.85em; font-family: 'Courier New', monospace; color: #00ff88; word-break: break-all; overflow-y: auto;">
+                    <div class="empty-message">Start capture to see details</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top: 20px;">
+            <h3>Ruleset Experiment (Algorithm Comparison)</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; align-items: flex-end;">
+                <div class="control-group">
+                    <label for="ruleset-interface">Interface</label>
+                    <select id="ruleset-interface">
+                        <option value="">Select interface...</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="ruleset-count">Packets</label>
+                    <input type="number" id="ruleset-count" value="3000" min="100" max="50000">
+                </div>
+                <div class="control-group">
+                    <label for="ruleset-save">Save PCAP</label>
+                    <input type="checkbox" id="ruleset-save">
+                </div>
+                <button id="run-ruleset-btn" onclick="runRulesetExperiment()" style="justify-self: stretch;">▶ Run Experiment</button>
+            </div>
+            <div id="ruleset-results" style="font-size: 0.85em; font-family: 'Courier New', monospace; color: #00ff88; word-break: break-all; overflow-y: auto; background: #16213e; border: 1px solid #0f3460; border-radius: 4px; padding: 15px; min-height: 200px;">
+                <div class="empty-message">Results will appear here</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let isCaptureActive = false;
+        let updateInterval = null;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            loadInterfaces();
+            updateStats();
+            setInterval(updateStats, 2000);
+        });
+        
+        async function loadInterfaces() {
+            try {
+                console.log('Loading interfaces from API...');
+                const response = await fetch('/api/interfaces', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('API response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Interfaces data received:', data);
+                
+                const select = document.getElementById('interface-select');
+                const rulesetSelect = document.getElementById('ruleset-interface');
+                select.innerHTML = '';
+                rulesetSelect.innerHTML = '';
+                
+                if (data.interfaces && data.interfaces.length > 0) {
+                    data.interfaces.forEach((iface) => {
+                        const option = document.createElement('option');
+                        option.value = iface.name;
+                        option.textContent = `${iface.friendly_name} [${iface.type}] - ${iface.ip || 'No IP'}`;
+                        select.appendChild(option);
+                        
+                        const rulesetOption = document.createElement('option');
+                        rulesetOption.value = iface.name;
+                        rulesetOption.textContent = `${iface.friendly_name} [${iface.type}] - ${iface.ip || 'No IP'}`;
+                        rulesetSelect.appendChild(rulesetOption);
+                    });
+                    select.value = data.interfaces[0].name;
+                    rulesetSelect.value = data.interfaces[0].name;
+                    console.log(`Successfully loaded ${data.interfaces.length} interfaces`);
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No interfaces found';
+                    select.appendChild(option);
+                    
+                    const rulesetOption = document.createElement('option');
+                    rulesetOption.value = '';
+                    rulesetOption.textContent = 'No interfaces found';
+                    rulesetSelect.appendChild(rulesetOption);
+                }
+            } catch (error) {
+                console.error('Error loading interfaces:', error);
+                console.error('Stack:', error.stack);
+                showError('Failed to load network interfaces: ' + error.message + 
+                         '. Make sure the API server is running at http://localhost:5000');
+            }
+        }
+        
+        async function startCapture() {
+            const selectedInterface = document.getElementById('interface-select').value;
+            const packetCount = parseInt(document.getElementById('packet-count').value);
+            
+            if (!selectedInterface) {
+                showError('Please select a network interface');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/start-capture', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        interface: selectedInterface,
+                        count: packetCount,
+                        save_pcap: document.getElementById('save-pcap').checked,
+                        pcap_filename: document.getElementById('pcap-filename').value.trim()
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to start capture');
+                
+                const data = await response.json();
+                isCaptureActive = true;
+                
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = false;
+                document.getElementById('interface-select').disabled = true;
+                document.getElementById('packet-count').disabled = true;
+                document.getElementById('status').classList.add('active');
+                
+                document.getElementById('capture-details').innerHTML = 
+                    `<strong>Capturing on:</strong><br>${data.friendly_name}<br><br>` +
+                    `<strong>Interface:</strong><br>${selectedInterface}<br><br>` +
+                    `<strong>Target Packets:</strong><br>${packetCount}`;
+                
+                updatePackets();
+                if (updateInterval) clearInterval(updateInterval);
+                updateInterval = setInterval(updatePackets, 1000);
+                
+                hideError();
+            } catch (error) {
+                showError('Error starting capture: ' + error.message);
+            }
+        }
+        
+        async function stopCapture() {
+            try {
+                const response = await fetch('/api/stop-capture', { method: 'POST' });
+                if (!response.ok) throw new Error('Failed to stop capture');
+                const data = await response.json();
+                
+                isCaptureActive = false;
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('stop-btn').disabled = true;
+                document.getElementById('interface-select').disabled = false;
+                document.getElementById('packet-count').disabled = false;
+                document.getElementById('status').classList.remove('active');
+                
+                if (updateInterval) clearInterval(updateInterval);
+
+                if (data && data.pcap_file) {
+                    const details = document.getElementById('capture-details');
+                    details.innerHTML += `<br><br><strong>Saved PCAP:</strong> ${data.pcap_file}`;
+                }
+
+                hideError();
+            } catch (error) {
+                showError('Error stopping capture: ' + error.message);
+            }
+        }
+        
+        async function updatePackets() {
+            try {
+                const response = await fetch('/api/packets');
+                if (!response.ok) throw new Error('Failed to fetch packets');
+                
+                const data = await response.json();
+                const packetList = document.getElementById('packet-list');
+                
+                if (data.packets && data.packets.length > 0) {
+                    packetList.innerHTML = data.packets
+                        .map(p => {
+                            const proto = (p.protocol || 'Unknown').toLowerCase();
+                            const time = new Date(p.timestamp).toLocaleTimeString();
+                            const num = p.number || '?';
+                            const src = p.src_ip || 'N/A';
+                            const dst = p.dst_ip || 'N/A';
+                            const info = p.info || '';
+                            const ports = p.src_port && p.dst_port ? ` [${p.src_port}→${p.dst_port}]` : '';
+                            return `<div class="packet-item ${proto}">
+                                <strong>#${num}</strong> <em>${time}</em> — <strong>${p.protocol}</strong><br>
+                                ${src} → ${dst}${ports}<br>
+                                <span style="color:#ccc; font-size:0.85em;">${info} (${p.length} bytes)</span>
+                            </div>`;
+                        })
+                        .join('');
+                } else {
+                    packetList.innerHTML = '<div class="empty-message">No packets captured yet...</div>';
+                }
+            } catch (error) {
+                console.error('Error updating packets:', error);
+            }
+        }
+        
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) throw new Error('Failed to fetch stats');
+                
+                const data = await response.json();
+                const totalEl = document.getElementById('total-packets');
+                const tcpEl = document.getElementById('tcp-count');
+                const dnsEl = document.getElementById('dns-count');
+                const udpEl = document.getElementById('udp-count');
+                const arpEl = document.getElementById('arp-count');
+                const icmpEl = document.getElementById('icmp-count');
+                
+                if (totalEl) totalEl.textContent = data.total || 0;
+                if (tcpEl) tcpEl.textContent = (data.protocols && data.protocols['TCP']) || 0;
+                if (dnsEl) dnsEl.textContent = (data.protocols && data.protocols['DNS']) || 0;
+                if (udpEl) udpEl.textContent = (data.protocols && data.protocols['UDP']) || 0;
+                if (arpEl) arpEl.textContent = (data.protocols && data.protocols['ARP']) || 0;
+                if (icmpEl) icmpEl.textContent = (data.protocols && data.protocols['ICMP']) || 0;
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+        
+        function hideError() {
+            document.getElementById('error-message').classList.remove('show');
+        }
+        
+        async function runRulesetExperiment() {
+            const interface_val = document.getElementById('ruleset-interface').value;
+            const count = parseInt(document.getElementById('ruleset-count').value) || 3000;
+            const savePcap = document.getElementById('ruleset-save').checked;
+            
+            if (!interface_val) {
+                showError('Please select an interface for the ruleset experiment');
+                return;
+            }
+            
+            const resultsDiv = document.getElementById('ruleset-results');
+            resultsDiv.innerHTML = '<div class="empty-message">Running experiment... Please wait</div>';
+            document.getElementById('run-ruleset-btn').disabled = true;
+            
+            try {
+                const response = await fetch('/api/run-ruleset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        interface: interface_val,
+                        count: count,
+                        save_pcap: savePcap,
+                        pcap_filename: savePcap ? `ruleset_experiment_${Date.now()}.pcap` : ''
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Failed to run ruleset experiment');
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `<strong>✓ Experiment Completed</strong><br><br>`;
+                    html += `<strong>Chosen Packet (Index ${data.chosen_index}):</strong><br>`;
+                    html += `${data.chosen_summary}<br><br>`;
+                    html += `<strong>Pattern Size:</strong> ${data.pattern_len} bytes<br><br>`;
+                    
+                    html += `<strong>Algorithm Comparison Results:</strong><br>`;
+                    html += `<table class="ruleset-table">`;
+                    html += `<tr>`;
+                    html += `<th>Algorithm</th>`;
+                    html += `<th style="text-align: right;">Matches</th>`;
+                    html += `<th style="text-align: right;">Time (ms)</th>`;
+                    html += `<th>Complexity</th>`;
+                    html += `</tr>`;
+                    
+                    for (const [algo, result] of Object.entries(data.results)) {
+                        const timeMs = (result.time_s * 1000).toFixed(3);
+                        const complexity = data.expected_complexities[algo] || 'N/A';
+                        html += `<tr>`;
+                        html += `<td><strong>${algo}</strong></td>`;
+                        html += `<td style="text-align: right;">${result.matches}</td>`;
+                        html += `<td style="text-align: right;">${timeMs}</td>`;
+                        html += `<td>${complexity}</td>`;
+                        html += `</tr>`;
+                    }
+                    
+                    html += `</table>`;
+                    
+                    if (data.saved_pcap) {
+                        html += `<br><br><strong>Saved PCAP:</strong> ${data.saved_pcap}`;
+                    }
+                    
+                    resultsDiv.innerHTML = html;
+                    hideError();
+                } else {
+                    throw new Error(data.error || 'Experiment failed');
+                }
+            } catch (error) {
+                showError('Error running ruleset experiment: ' + error.message);
+                resultsDiv.innerHTML = '<div class="empty-message">Experiment failed</div>';
+            } finally {
+                document.getElementById('run-ruleset-btn').disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
