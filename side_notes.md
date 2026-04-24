@@ -26,12 +26,14 @@ possible causes (may be correct and may be not, just some guesses):
     * protocol detection logic verfied correct for all types
     * threading & daemon architecture operational
     * network adapter responding to ARP requests
+* npcap is the issue? if npcap has some limitations it is possible that npcap itself is the issue
 
 some possible solutions? (could not be correct, just some guesses):
 * Align templates/app.py's capture logic with packet_capturer_Version2.py:
     * Use the same simple sniff approach without stop_filter
     * Or use direct Scapy interface names instead of friendly name mapping
 * copilot concluded that the solution isnt to debug network routing, but to add a configurable BPF filter parameter to app.py and use filter="ip or arp" to capture all protocol types just like version2 does
+* if npcap is the issue would installing winpcap and make the project work with it instead solve it?
 - once going to the broswer after starting app.py, this message is contuined to be printed in the powershell: 
     ```INFO:werkzeug:127.0.0.1 - - [22/Apr/2026 17:53:59] "GET /api/stats HTTP/1.1" 200 -``` which can be annoying, but it is just the flask server logging the request to the /api/stats endpoint, which is expected behavior when the browser makes a request to that endpoint to fetch the stats data. (can it be disabled? maybe, but it is not a critical issue and can be ignored for now) #ingnorable/ minor issue
 - it can be easy to mix up which URL to use when accessing the web interface, and it is needed to update "how_to_run.md" to make it more clear when to use each URL #medium issue/ not so critical but can cause confusion for users, so it should be clarified in the instructions.
