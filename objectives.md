@@ -26,3 +26,4 @@
 * the user can choose to apply the ruleset as a filter for the captured packets, and then it will show only the packets that match the ruleset
 * the user can choose to clear the ruleset and stop applying it as a filter for the captured packets, and then it will show all the captured packets again
 * the user can choose to save the ruleset for later use, and then it will be saved in a file that can be loaded later to apply it as a filter for the captured packets
+* this system has an info side button in the gui interface to explain how it works and how to use it, and it also has a section in the instructions to explain how to use it and what are the expected results of the algorithms and how to interpret them
