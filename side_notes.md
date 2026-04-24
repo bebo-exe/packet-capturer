@@ -30,6 +30,9 @@ possible causes (may be correct and may be not, just some guesses):
     * network adapter responding to ARP requests
 * npcap is the issue? if npcap has some limitations it is possible that npcap itself is the issue
 
+## important note for this issue
+the platform can work perfectly fine on linux, meaning its very much likely the BPF filter that needs proper configuring
+
 some possible solutions? (could not be correct, just some guesses):
 * Align templates/app.py's capture logic with packet_capturer_Version2.py:
     * Use the same simple sniff approach without stop_filter
