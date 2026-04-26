@@ -1,4 +1,3 @@
-#!/home/bebo/templates/.venv/bin/python3
 """
 Simplified Wireshark-like Browser Packet Analyzer
 Real-time packet capture with interface detection
