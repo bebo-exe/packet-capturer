@@ -168,6 +168,70 @@ def parse_ipconfig_detailed() -> List[Dict]:
             if current_adapter:
                 adapters.append(current_adapter)
 
+        elif system == 'darwin':
+            # macOS: Use ifconfig for interface detection
+            try:
+                result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=10)
+                lines = result.stdout.splitlines()
+                
+                current_adapter = None
+                for line in lines:
+                    # Interface names start at column 0 (no leading spaces/tabs)
+                    if line and not line.startswith(' ') and not line.startswith('\t'):
+                        iface_name = line.split(':')[0].strip()
+                        
+                        # Skip certain interfaces
+                        if not iface_name:
+                            continue
+                        
+                        # Determine interface type
+                        iface_lower = iface_name.lower()
+                        is_loopback = iface_lower == 'lo0'
+                        is_wireless = iface_lower.startswith(('en', 'utun')) or 'wi-fi' in iface_lower or 'airport' in iface_lower
+                        
+                        if is_loopback:
+                            adapter_type = 'Loopback'
+                            display_name = 'Loopback (localhost)'
+                            default_ip = '127.0.0.1'
+                        elif is_wireless:
+                            adapter_type = 'WiFi (Wireless)'
+                            display_name = iface_name
+                            default_ip = ''
+                        else:
+                            adapter_type = 'Ethernet'
+                            display_name = iface_name
+                            default_ip = ''
+                        
+                        current_adapter = {
+                            'full_name': iface_name,
+                            'display_name': display_name,
+                            'type': adapter_type,
+                            'ip': default_ip,
+                            'is_wireless': is_wireless,
+                            'physical_address': '',
+                            'description': ''
+                        }
+                        adapters.append(current_adapter)
+                    
+                    # Parse IP addresses (inet lines, not inet6)
+                    elif current_adapter and line.strip().startswith('inet ') and 'inet6' not in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            ip = parts[1]
+                            if ip and '.' in ip and not ip.startswith('169.254') and not ip.startswith('127.'):
+                                current_adapter['ip'] = ip
+                    
+                    # Parse MAC addresses (ether lines)
+                    elif current_adapter and 'ether ' in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            mac = parts[1]
+                            if mac.count(':') >= 5:  # Valid MAC format
+                                current_adapter['physical_address'] = mac
+            
+            except Exception as e:
+                logger.warning(f"Error parsing macOS ifconfig output: {e}")
+
         else:
             # Try a Linux / generic POSIX strategy using `ip -o addr` and `/sys/class/net` for MAC
             try:
@@ -599,7 +663,7 @@ def start_capture_api():
         
         # Use default BPF filter if not provided (required for Windows/NPCap)
         if not bpf_filter:
-            bpf_filter = 'ip or arp'
+            bpf_filter = 'ip'
 
         if not interface:
             return jsonify({'success': False, 'error': 'No interface selected'}), 400
@@ -663,20 +727,27 @@ def start_capture_api():
                         print(f"[DEBUG] Exception in packet_callback: {e}")
 
                 print("[DEBUG] About to start sniff...")
-                # Use single sniff() call with mandatory BPF filter
-                # Required for Windows/NPCap to deliver all packet types (TCP, ICMP, DNS, etc)
-                # timeout=10 allows time for test traffic to arrive
+                # Continuous capture loop - check is_capturing flag between sniff cycles
                 
                 try:
-                    sniff_count = count if count > 0 else 0
-                    print(f"[DEBUG] Starting sniff with filter='{bpf_filter}', count={sniff_count}, timeout=10s")
-                    sniff(
-                        iface=scapy_iface,
-                        prn=packet_callback,
-                        filter=bpf_filter,
-                        store=False,
-                        timeout=10  # Wait up to 10 seconds for packets
-                    )
+                    print(f"[DEBUG] Starting sniff with filter='{bpf_filter}'")
+                    
+                    # Single blocking sniff - Npcap on Windows requires filter to be applied once at sniff start
+                    while is_capturing:
+                        try:
+                            sniff(
+                                iface=scapy_iface,
+                                prn=packet_callback,
+                                filter=bpf_filter,
+                                promisc=True,
+                                store=False,
+                                timeout=5  # Small timeout to check is_capturing flag
+                            )
+                        except Exception as sniff_ex:
+                            print(f"[DEBUG] Sniff iteration exception: {sniff_ex}")
+                            if not is_capturing:
+                                break
+                            # Continue looping to retry
                 except KeyboardInterrupt:
                     print("[DEBUG] Sniff interrupted by KeyboardInterrupt")
                 except Exception as e:
@@ -991,7 +1062,7 @@ def run_ruleset():
     
     # Use default BPF filter if not provided (required for Windows/NPCap)
     if not bpf_filter:
-        bpf_filter = 'ip or arp'
+        bpf_filter = 'ip'
 
     if not interface:
         return jsonify({'success': False, 'error': 'No interface specified'}), 400
