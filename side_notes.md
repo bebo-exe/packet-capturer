@@ -32,7 +32,7 @@ possible causes (may be correct and may be not, just some guesses):
 * npcap is the issue? if npcap has some limitations it is possible that npcap itself is the issue
 * more than one sniff call sites? there may have more than one sniff(), and the one actually running does NOT use the filter. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
   
-**important note for this issue:-**  
+* important note for this issue:-  
 the platform can work perfectly fine on linux, and it can normally capture tcp, icmp and http/s, meaning its very much likely the BPF filter that needs proper configuring (this took some time to discover because the platform wasnt tested on linux untill later on)
     * even after configuring the BPF filter, it still resists capturing tcp, icmp and http/s packets, which may indicate that there is an issue with how the filter is being applied or with the capture library itself on windows (e.g. npcap) and it may require further investigation or testing to determine the root cause of the issue and find a solution for it. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
     * while it still works perfectly fine on linux because it uses libpcap which handles the BPF filters in its own way and may not have the same limitations as npcap on windows, which is why it is able to capture all packets correctly without needing any special configuration for the BPF filters. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
