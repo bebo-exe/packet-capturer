@@ -1,11 +1,12 @@
 ## extra objectives of packet analyzer platform
 
-- platform works for both windows and linux
+- platform works for windows, linux, and macos
+- "how_to_run.md" would have a section for each OS to explain how to run the platform on it, and it would also have a section for the npcap driver installation for windows, and it would also have a section for troubleshooting common issues that may occur during the installation and running of the platform
 - have a gui interface to show the captured packets in real time
 - have a filter system to filter the captured packets by protocol, source, destination, etc
 - have a statistics page to show the number of captured packets, the most common protocols, the most common source and destination, etc
 - improved code structure and organization such that it is able to perform more like a real packet analyzer platform and be more efficient in capturing and analyzing packets (E.X wireshark)
-- include udp, arp, icmp and http/s in the gui interface
+- include udp, arp, icmp, http/https (both are in same category but https is classified as tls if captured) in the gui interface
 - have details when the packet gets captured (its number, source, destination, info)
 - an option to save the captured packets in a pcap file
 - these saved pcap files are saved in a directory called "capturs"
@@ -13,6 +14,7 @@
 - and option to clear the captured packets from the platform
 - a pie chart to show the distribution of the captured packets by protocol, source, destination, etc in real time
 - this pie chart should be updated in real time as the packets are captured and analyzed, and it should also have the option to show the distribution of the captured packets by different criteria (protocol, source, destination, etc) and it should also have the option to show the distribution of the captured packets in a specific time range (last 5 minutes, last 10 minutes, etc) and it should also have the option to show the distribution of the captured packets in a specific time range for a specific protocol, source or destination (last 5 minutes for tcp packets, last 10 minutes for packets from a specific source, etc)
+- for the normal capture process, remove the option to choose how many packets to capture, and instead make it so that the capture process continues until the user decides to stop it, and while capturing it should show the number of captured packets in real time, and it should also have the option to show the number of captured packets for each protocol, source, destination, etc in real time
 - an option to save the statistics of the captured packets in a file that can be loaded later to show the statistics again
 - a ruleset system that works this way (an example of the ruleset):
 * this system has its own captureing process that is separate from the main capturing process
