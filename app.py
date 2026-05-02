@@ -3,7 +3,7 @@ Simplified Wireshark-like Browser Packet Analyzer
 Real-time packet capture with interface detection
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
 import threading
 import logging
@@ -16,12 +16,14 @@ import platform
 import os
 import time
 import random
+import json
+from io import BytesIO
 
 # Ensure scapy is available
 try:
     from scapy.all import sniff, IP, TCP, UDP, ICMP, Ether, ARP, IPv6, get_if_list, conf
-    # Import PcapWriter for writing pcap files incrementally
-    from scapy.utils import PcapWriter
+    # Import PcapWriter and PcapReader for writing and reading pcap files
+    from scapy.utils import PcapWriter, PcapReader
     print("✓ Scapy imported successfully")
 except ImportError as e:
     print(f"✗ ERROR: Scapy not installed: {e}")
@@ -661,9 +663,10 @@ def start_capture_api():
         requested_pcap_name = data.get('pcap_filename', '').strip()
         bpf_filter = data.get('filter', '').strip()
         
-        # Use default BPF filter if not provided (required for Windows/NPCap)
+        # Use empty filter by default to capture all packets (matches packet_capturer_Version2.py)
+        # Empty filter captures everything without BPF restrictions
         if not bpf_filter:
-            bpf_filter = 'ip'
+            bpf_filter = ''
 
         if not interface:
             return jsonify({'success': False, 'error': 'No interface selected'}), 400
@@ -701,7 +704,10 @@ def start_capture_api():
 
         def capture_packets():
             global is_capturing, pcap_writer
-            print(f"[DEBUG] capture_packets() thread started. is_capturing={is_capturing}")
+            import sys
+            print(f"[DEBUG] capture_packets() thread started. is_capturing={is_capturing}", flush=True)
+            sys.stderr.write(f"[THREAD START] capture_packets() thread started\n")
+            sys.stderr.flush()
             try:
                 logger.info(f"Starting packet capture on {iface_info['friendly_name']} ({scapy_iface}) with filter='{bpf_filter}'")
                 print(f"[DEBUG] Beginning sniff on interface: {scapy_iface}")
@@ -735,14 +741,16 @@ def start_capture_api():
                     # Single blocking sniff - Npcap on Windows requires filter to be applied once at sniff start
                     while is_capturing:
                         try:
-                            sniff(
-                                iface=scapy_iface,
-                                prn=packet_callback,
-                                filter=bpf_filter,
-                                promisc=True,
-                                store=False,
-                                timeout=5  # Small timeout to check is_capturing flag
-                            )
+                            sniff_kwargs = {
+                                'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
+                                'prn': packet_callback,
+                                'promisc': True,
+                                'store': False,
+                                'timeout': 5  # Small timeout to check is_capturing flag
+                            }
+                            if bpf_filter:  # Only add filter if it's not empty
+                                sniff_kwargs['filter'] = bpf_filter
+                            sniff(**sniff_kwargs)
                         except Exception as sniff_ex:
                             print(f"[DEBUG] Sniff iteration exception: {sniff_ex}")
                             if not is_capturing:
@@ -847,6 +855,130 @@ def clear_packets():
     global packets_list
     packets_list = []
     return jsonify({'success': True, 'message': 'Packets cleared'})
+
+@app.route('/api/load-pcap', methods=['POST'])
+def load_pcap():
+    """Load and parse PCAP file"""
+    global packets_list
+    
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        
+        # Create captures directory if it doesn't exist
+        if not os.path.exists('captures'):
+            os.makedirs('captures')
+        
+        # Save uploaded file to temporary location
+        temp_file_path = os.path.join('captures', f'temp_load_{int(time.time())}_{file.filename}')
+        file.save(temp_file_path)
+        
+        # Clear existing packets
+        packets_list = []
+        protocols = {}
+        
+        try:
+            # Parse PCAP file using file path
+            pcap_reader = PcapReader(temp_file_path)
+            
+            packet_count = 0
+            for packet in pcap_reader:
+                try:
+                    # Process the packet
+                    process_packet(packet)
+                    packet_count += 1
+                except Exception as e:
+                    logger.warning(f"Error processing packet from PCAP: {e}")
+                    continue
+            
+            # Count protocols from all packets
+            for pkt in packets_list:
+                proto = pkt.get('protocol', 'Unknown')
+                protocols[proto] = protocols.get(proto, 0) + 1
+            
+            # Clean up temporary file
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            
+            return jsonify({
+                'success': True,
+                'packets': packets_list,
+                'count': len(packets_list),
+                'protocols': protocols,
+                'message': f'Loaded {len(packets_list)} packets from {file.filename}'
+            })
+        
+        except Exception as e:
+            logger.error(f"Error parsing PCAP file: {e}")
+            # Clean up temporary file
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            return jsonify({
+                'success': False,
+                'error': f'Error parsing PCAP file: {str(e)}',
+                'packets': []
+            }), 400
+    
+    except Exception as e:
+        logger.error(f"Error loading PCAP: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Error loading PCAP: {str(e)}'
+        }), 500
+
+@app.route('/api/export-stats', methods=['POST'])
+def export_stats():
+    """Export packet statistics to JSON file"""
+    try:
+        protocols = {}
+        for pkt in packets_list:
+            proto = pkt.get('protocol', 'Unknown')
+            protocols[proto] = protocols.get(proto, 0) + 1
+        
+        stats = {
+            'exported': datetime.now().isoformat(),
+            'total_packets': len(packets_list),
+            'protocols': protocols,
+            'packet_summary': [
+                {
+                    'number': pkt['number'],
+                    'timestamp': pkt['timestamp'],
+                    'protocol': pkt['protocol'],
+                    'src_ip': pkt.get('src_ip', ''),
+                    'dst_ip': pkt.get('dst_ip', ''),
+                    'src_port': pkt.get('src_port', ''),
+                    'dst_port': pkt.get('dst_port', ''),
+                    'length': pkt.get('length', 0),
+                    'info': pkt.get('info', '')
+                }
+                for pkt in packets_list
+            ]
+        }
+        
+        # Create JSON response
+        stats_json = json.dumps(stats, indent=2)
+        
+        return send_file(
+            BytesIO(stats_json.encode('utf-8')),
+            mimetype='application/json',
+            as_attachment=True,
+            download_name=f'packet_stats_{int(time.time())}.json'
+        )
+    
+    except Exception as e:
+        logger.error(f"Error exporting statistics: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Error exporting statistics: {str(e)}'
+        }), 500
 
 # ============================================================================
 # PACKET PROCESSING
@@ -1060,9 +1192,10 @@ def run_ruleset():
     requested_pcap_name = data.get('pcap_filename', '').strip()
     bpf_filter = data.get('filter', '').strip()
     
-    # Use default BPF filter if not provided (required for Windows/NPCap)
+    # Use empty filter by default to capture all packets (matches packet_capturer_Version2.py)
+    # Empty filter captures everything without BPF restrictions
     if not bpf_filter:
-        bpf_filter = 'ip'
+        bpf_filter = ''
 
     if not interface:
         return jsonify({'success': False, 'error': 'No interface specified'}), 400
@@ -1075,7 +1208,15 @@ def run_ruleset():
         captured.append(pkt)
 
     try:
-        sniff(iface=scapy_iface, prn=_cb, filter=bpf_filter, count=count, store=False)
+        sniff_kwargs = {
+            'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
+            'prn': _cb,
+            'count': count,
+            'store': False
+        }
+        if bpf_filter:  # Only add filter if it's not empty
+            sniff_kwargs['filter'] = bpf_filter
+        sniff(**sniff_kwargs)
     except Exception as e:
         return jsonify({'success': False, 'error': f'Capture failed: {e}'}), 500
 
