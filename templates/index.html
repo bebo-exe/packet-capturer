@@ -640,6 +640,22 @@
                 <button id="run-ruleset-btn" onclick="runRulesetExperiment()" style="justify-self: stretch;">▶ Run Experiment</button>
                 <button id="stop-ruleset-btn" onclick="stopRulesetExperiment()" style="justify-self: stretch; display: none; background-color: #ff4444; border-color: #ff6666;">⏹ Stop Experiment</button>
             </div>
+            <div id="ruleset-progress" style="display: none; margin-bottom: 15px; padding: 15px; background: #16213e; border: 1px solid #00ff88; border-radius: 4px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+                    <div>
+                        <div style="font-size: 0.9em; color: #888; margin-bottom: 5px;">Packets Captured</div>
+                        <div style="font-size: 2em; color: #00ff88; font-weight: bold;" id="ruleset-current-count">0</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.9em; color: #888; margin-bottom: 5px;">Target</div>
+                        <div style="font-size: 2em; color: #00ff88; font-weight: bold;" id="ruleset-target-count">0</div>
+                    </div>
+                </div>
+                <div style="width: 100%; height: 20px; background: #0f3460; border: 1px solid #00ff88; border-radius: 4px; overflow: hidden;">
+                    <div id="ruleset-progress-bar" style="height: 100%; background: linear-gradient(90deg, #00ff88, #00cc66); width: 0%; transition: width 0.3s ease;"></div>
+                </div>
+                <div style="text-align: center; margin-top: 8px; font-size: 0.85em; color: #888;" id="ruleset-progress-text">0%</div>
+            </div>
             <div id="ruleset-results" style="font-size: 0.85em; font-family: 'Courier New', monospace; color: #00ff88; word-break: break-all; overflow-y: auto; background: #16213e; border: 1px solid #0f3460; border-radius: 4px; padding: 15px; min-height: 200px;">
                 <div class="empty-message">Results will appear here</div>
             </div>
@@ -1105,14 +1121,22 @@
         }
         
         async function stopRulesetExperiment() {
-            if (rulesetAbortController) {
-                rulesetAbortController.abort();
-                showSuccess('Ruleset experiment stopped');
-                document.getElementById('run-ruleset-btn').disabled = false;
+            try {
+                // Notify backend to stop capturing
+                await fetch('/api/stop-ruleset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                // Don't abort the fetch - let it complete naturally so we can check for confirmation requirement
                 document.getElementById('stop-ruleset-btn').style.display = 'none';
-                document.getElementById('ruleset-results').innerHTML = '<div class="empty-message">Experiment stopped by user</div>';
+                document.getElementById('ruleset-results').innerHTML = '<div class="empty-message">Stopping experiment... please wait</div>';
+            } catch (error) {
+                console.error('Error stopping experiment:', error);
             }
         }
+        
+        let rulesetProgressInterval = null;
         
         // Override the original runRulesetExperiment function to add abort control
         const originalRunRulesetExperiment = runRulesetExperiment;
@@ -1131,6 +1155,33 @@
             document.getElementById('run-ruleset-btn').disabled = true;
             document.getElementById('stop-ruleset-btn').style.display = 'block';
             
+            // Show progress section and set target
+            const progressDiv = document.getElementById('ruleset-progress');
+            progressDiv.style.display = 'block';
+            document.getElementById('ruleset-target-count').textContent = count;
+            document.getElementById('ruleset-current-count').textContent = '0';
+            document.getElementById('ruleset-progress-bar').style.width = '0%';
+            document.getElementById('ruleset-progress-text').textContent = '0%';
+            
+            // Start polling for packet updates
+            if (rulesetProgressInterval) clearInterval(rulesetProgressInterval);
+            rulesetProgressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/ruleset-packets');
+                    if (response.ok) {
+                        const data = await response.json();
+                        const currentCount = data.count || 0;
+                        const percentage = Math.min((currentCount / count) * 100, 100);
+                        
+                        document.getElementById('ruleset-current-count').textContent = currentCount;
+                        document.getElementById('ruleset-progress-bar').style.width = percentage + '%';
+                        document.getElementById('ruleset-progress-text').textContent = Math.floor(percentage) + '%';
+                    }
+                } catch (error) {
+                    console.error('Error fetching packet count:', error);
+                }
+            }, 500);
+            
             // Create abort controller for this experiment
             rulesetAbortController = new AbortController();
             
@@ -1147,12 +1198,58 @@
                     signal: rulesetAbortController.signal
                 });
                 
-                if (!response.ok) throw new Error('Failed to run ruleset experiment');
-                
                 const data = await response.json();
+                
+                // Check for minimum packet requirement error
+                if (!response.ok && data.requires_minimum) {
+                    let errorHtml = `<div style="background-color: #ff6b35; color: #000; padding: 15px; border-radius: 4px; border-left: 4px solid #ff4500; text-align: center;">`;
+                    errorHtml += `<strong>⚠️ ${data.error}</strong><br><br>`;
+                    errorHtml += `<p>${data.message}</p>`;
+                    errorHtml += `</div>`;
+                    resultsDiv.innerHTML = errorHtml;
+                    document.getElementById('run-ruleset-btn').disabled = false;
+                    document.getElementById('stop-ruleset-btn').style.display = 'none';
+                    hideError();
+                    return;
+                }
+                
+                // Check for early stop confirmation requirement
+                if (!response.ok && data.requires_confirmation) {
+                    let confirmationHtml = `<div style="background-color: #ff9800; color: #000; padding: 15px; border-radius: 4px; border-left: 4px solid #ff6600;">`;
+                    confirmationHtml += `<strong>⚠️ ${data.message}</strong><br><br>`;
+                    confirmationHtml += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">`;
+                    confirmationHtml += `<button onclick="confirmRulesetContinue(true)" style="background: #4caf50; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">✓ Continue Anyway</button>`;
+                    confirmationHtml += `<button onclick="confirmRulesetContinue(false)" style="background: #f44336; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">✕ Start Over</button>`;
+                    confirmationHtml += `</div></div>`;
+                    resultsDiv.innerHTML = confirmationHtml;
+                    document.getElementById('run-ruleset-btn').disabled = false;
+                    document.getElementById('stop-ruleset-btn').style.display = 'none';
+                    hideError();
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to run ruleset experiment');
+                }
+                
+                console.log('Ruleset response data:', data);
+                console.log('Warning value:', data.warning);
+                console.log('Packets captured:', data.packets_captured);
+                console.log('User stopped early:', data.user_stopped_early);
+                console.log('Requested count:', data.requested_count);
                 
                 if (data.success) {
                     let html = `<strong>✓ Experiment Completed</strong><br><br>`;
+                    
+                    // Display warning if fewer than 1000 packets
+                    if (data.warning) {
+                        console.log('Displaying warning:', data.warning);
+                        html += `<div style="background-color: #ff6b35; color: #000; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #ff4500;"><strong>⚠️ ${data.warning}</strong></div>`;
+                    } else {
+                        console.log('No warning - either null or undefined');
+                    }
+                    
+                    html += `<strong>Packets Captured:</strong> ${data.packets_captured}<br>`;
                     html += `<strong>Chosen Packet (Index ${data.chosen_index}):</strong><br>`;
                     html += `${data.chosen_summary}<br><br>`;
                     html += `<strong>Pattern Size:</strong> ${data.pattern_len} bytes<br><br>`;
@@ -1196,9 +1293,89 @@
                     resultsDiv.innerHTML = '<div class="empty-message">Experiment failed</div>';
                 }
             } finally {
+                // Clear progress polling
+                if (rulesetProgressInterval) {
+                    clearInterval(rulesetProgressInterval);
+                    rulesetProgressInterval = null;
+                }
+                // Hide progress section
+                document.getElementById('ruleset-progress').style.display = 'none';
                 document.getElementById('run-ruleset-btn').disabled = false;
                 document.getElementById('stop-ruleset-btn').style.display = 'none';
                 rulesetAbortController = null;
+            }
+        }
+        
+        async function confirmRulesetContinue(proceed) {
+            const interface_val = document.getElementById('ruleset-interface').value;
+            const resultsDiv = document.getElementById('ruleset-results');
+            
+            resultsDiv.innerHTML = '<div class="empty-message">Processing your choice...</div>';
+            document.getElementById('run-ruleset-btn').disabled = true;
+            
+            try {
+                const response = await fetch('/api/confirm-ruleset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proceed: proceed })
+                });
+                
+                const data = await response.json();
+                
+                if (!proceed) {
+                    resultsDiv.innerHTML = '<div class="empty-message">Experiment cancelled. Ready to start a new capture.</div>';
+                    hideError();
+                } else if (data.success) {
+                    // Display the analysis results
+                    let html = `<strong>✓ Experiment Completed</strong><br><br>`;
+                    html += `<div style="background-color: #ff9800; color: #000; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #ff6600;"><strong>ℹ️ Analysis completed with ${data.packets_captured} packets (fewer than recommended 1000)</strong></div>`;
+                    
+                    html += `<strong>Packets Captured:</strong> ${data.packets_captured}<br>`;
+                    html += `<strong>Chosen Packet (Index ${data.chosen_index}):</strong><br>`;
+                    html += `${data.chosen_summary}<br><br>`;
+                    html += `<strong>Pattern Size:</strong> ${data.pattern_len} bytes<br><br>`;
+                    
+                    html += `<strong>Algorithm Comparison Results:</strong><br>`;
+                    html += `<table class="ruleset-table">`;
+                    html += `<tr>`;
+                    html += `<th>Algorithm</th>`;
+                    html += `<th style="text-align: right;">Matches</th>`;
+                    html += `<th style="text-align: right;">Time (ms)</th>`;
+                    html += `<th>Complexity</th>`;
+                    html += `</tr>`;
+                    
+                    for (const [algo, result] of Object.entries(data.results)) {
+                        const timeMs = (result.time_s * 1000).toFixed(3);
+                        const complexity = data.expected_complexities[algo] || 'N/A';
+                        html += `<tr>`;
+                        html += `<td><strong>${algo}</strong></td>`;
+                        html += `<td style="text-align: right;">${result.matches}</td>`;
+                        html += `<td style="text-align: right;">${timeMs}</td>`;
+                        html += `<td>${complexity}</td>`;
+                        html += `</tr>`;
+                    }
+                    
+                    html += `</table>`;
+                    
+                    if (data.saved_pcap) {
+                        html += `<br><br><strong>Saved PCAP:</strong> ${data.saved_pcap}`;
+                    }
+                    
+                    resultsDiv.innerHTML = html;
+                    hideError();
+                } else {
+                    throw new Error(data.error || 'Confirmation failed');
+                }
+            } catch (error) {
+                showError('Error processing confirmation: ' + error.message);
+                resultsDiv.innerHTML = '<div class="empty-message">Error processing confirmation</div>';
+            } finally {
+                if (rulesetProgressInterval) {
+                    clearInterval(rulesetProgressInterval);
+                    rulesetProgressInterval = null;
+                }
+                document.getElementById('ruleset-progress').style.display = 'none';
+                document.getElementById('run-ruleset-btn').disabled = false;
             }
         }
     </script>
