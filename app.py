@@ -64,6 +64,11 @@ capture_thread = None
 pcap_writer = None
 pcap_filename = None
 
+# Ruleset capture state
+ruleset_capturing = False
+ruleset_stop_requested = False
+ruleset_captured_packets = []
+
 # Configure Scapy for Windows packet capture
 # Works with both npcap and winpcap - let Scapy auto-detect
 try:
@@ -682,11 +687,15 @@ def start_capture_api():
         pcap_writer = None
         pcap_filename = None
         if save_pcap:
+            # Create captures directory if it doesn't exist
+            if not os.path.exists('captures'):
+                os.makedirs('captures')
+            
             # Choose filename
             if requested_pcap_name:
-                pcap_filename = requested_pcap_name
+                pcap_filename = os.path.join('captures', requested_pcap_name)
             else:
-                pcap_filename = f"capture_{int(time.time())}.pcap"
+                pcap_filename = os.path.join('captures', f"capture_{int(time.time())}.pcap")
             try:
                 pcap_writer = PcapWriter(pcap_filename, append=False, sync=True)
                 logger.info(f"PCAP writing enabled: {pcap_filename}")
@@ -792,6 +801,23 @@ def start_capture_api():
         logger.error(f"Error in start_capture: {e}")
         is_capturing = False
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stop-ruleset', methods=['POST'])
+def stop_ruleset_api():
+    """Stop ruleset capture early"""
+    global ruleset_stop_requested
+    ruleset_stop_requested = True
+    return jsonify({'success': True, 'message': 'Ruleset stop requested'})
+
+@app.route('/api/ruleset-packets', methods=['GET'])
+def get_ruleset_packets():
+    """Get count of packets captured during ruleset experiment"""
+    global ruleset_captured_packets
+    return jsonify({
+        'success': True,
+        'count': len(ruleset_captured_packets),
+        'packets_captured': len(ruleset_captured_packets)
+    })
 
 @app.route('/api/stop-capture', methods=['POST'])
 def stop_capture_api():
@@ -1177,71 +1203,76 @@ def kmp_search(text: bytes, pattern: bytes) -> bool:
     return False
 
 
-@app.route('/api/run-ruleset', methods=['POST'])
-def run_ruleset():
-    """Run the example ruleset experiment described in objectives.md.
+# Temporary storage for ruleset parameters during confirmation flow
+ruleset_temp_params = {}
 
-    Captures N packets, chooses one at random, then runs three search algorithms
-    (quick/python 'in', Boyer-Moore, KMP) to locate the pattern in captured packets
-    and measures timings.
-    """
-    data = request.json or {}
-    interface = data.get('interface', '').strip()
-    count = int(data.get('count', 3000))
-    save_pcap = bool(data.get('save_pcap', False))
-    requested_pcap_name = data.get('pcap_filename', '').strip()
-    bpf_filter = data.get('filter', '').strip()
+def _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name):
+    """Perform the actual ruleset analysis on captured packets."""
+    # Prepare bytes list
+    bytes_list = [bytes(p) for p in captured]
     
-    # Use empty filter by default to capture all packets (matches packet_capturer_Version2.py)
-    # Empty filter captures everything without BPF restrictions
-    if not bpf_filter:
-        bpf_filter = ''
-
-    if not interface:
-        return jsonify({'success': False, 'error': 'No interface specified'}), 400
-
-    scapy_iface = get_scapy_interface_for_name(interface)
-
-    captured = []
-
-    def _cb(pkt):
-        captured.append(pkt)
-
-    try:
-        sniff_kwargs = {
-            'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
-            'prn': _cb,
-            'count': count,
-            'store': False
-        }
-        if bpf_filter:  # Only add filter if it's not empty
-            sniff_kwargs['filter'] = bpf_filter
-        sniff(**sniff_kwargs)
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'Capture failed: {e}'}), 500
-
-    if not captured:
-        return jsonify({'success': False, 'error': 'No packets captured'}), 400
-
-    # Choose random packet as ruleset
+    # Find a pattern that appears in multiple packets
+    # This ensures realistic algorithm comparison with meaningful match counts
+    pattern = None
+    pattern_summary = "Found repeating pattern"
+    
+    # Strategy: Look for repeating byte sequences across packets
+    # Start with medium-sized patterns and work down
+    for pattern_size in [32, 24, 16, 12]:
+        if pattern is not None:
+            break
+        # Try different offsets in the first packet
+        first_pkt = bytes_list[0]
+        if len(first_pkt) < pattern_size + 10:
+            continue
+        
+        # Sample from middle of packet (skip headers)
+        offset_start = min(40, len(first_pkt) // 3)
+        for offset in range(offset_start, min(offset_start + 20, len(first_pkt) - pattern_size)):
+            candidate = first_pkt[offset:offset + pattern_size]
+            # Count how many packets contain this pattern
+            matches = sum(1 for b in bytes_list if candidate in b)
+            if matches >= 2:  # Found a pattern that repeats!
+                pattern = candidate
+                break
+    
+    # Fallback: If no repeating pattern found, extract a small substring
+    # from multiple packets and use the most common one
+    if pattern is None:
+        pattern_candidates = []
+        for pkt in bytes_list[:min(5, len(bytes_list))]:  # Check first 5 packets
+            if len(pkt) > 50:
+                # Extract 16-byte patterns from various offsets
+                for offset in range(40, min(len(pkt) - 16, 100), 20):
+                    pattern_candidates.append(pkt[offset:offset + 16])
+        
+        if pattern_candidates:
+            # Use the first candidate (simple approach)
+            pattern = pattern_candidates[0]
+        else:
+            # Final fallback: use first 32 bytes of first packet
+            pattern = bytes_list[0][:32] if len(bytes_list[0]) >= 32 else bytes_list[0][:16]
+    
+    # Choose a random packet for display purposes
     chosen_idx = random.randrange(len(captured))
     pattern_pkt = captured[chosen_idx]
-    pattern = bytes(pattern_pkt)
 
     # Optionally save captured pcap
     saved_pcap = None
     if save_pcap:
         try:
-            writer = PcapWriter(requested_pcap_name or f"ruleset_capture_{int(time.time())}.pcap", append=False, sync=True)
+            # Create captures directory if it doesn't exist
+            if not os.path.exists('captures'):
+                os.makedirs('captures')
+            
+            pcap_path = os.path.join('captures', requested_pcap_name or f"ruleset_capture_{int(time.time())}.pcap")
+            writer = PcapWriter(pcap_path, append=False, sync=True)
             for p in captured:
                 writer.write(p)
             writer.close()
-            saved_pcap = requested_pcap_name or f"ruleset_capture_{int(time.time())}.pcap"
+            saved_pcap = pcap_path
         except Exception as e:
             logger.warning(f"Failed to save ruleset pcap: {e}")
-
-    # Prepare bytes list
-    bytes_list = [bytes(p) for p in captured]
 
     results = {}
 
@@ -1268,6 +1299,8 @@ def run_ruleset():
         'chosen_index': chosen_idx,
         'chosen_summary': pattern_pkt.summary(),
         'pattern_len': len(pattern),
+        'packets_captured': len(captured),
+        'requested_count': count,
         'results': results,
         'saved_pcap': saved_pcap,
         'expected_complexities': {
@@ -1276,6 +1309,132 @@ def run_ruleset():
             'kmp': 'O(n + m)'
         }
     })
+
+
+@app.route('/api/run-ruleset', methods=['POST'])
+def run_ruleset():
+    """Run the example ruleset experiment described in objectives.md.
+
+    Captures N packets, chooses one at random, then runs three search algorithms
+    (quick/python 'in', Boyer-Moore, KMP) to locate the pattern in captured packets
+    and measures timings.
+    """
+    global ruleset_capturing, ruleset_stop_requested, ruleset_captured_packets, ruleset_temp_params
+    
+    data = request.json or {}
+    interface = data.get('interface', '').strip()
+    count = int(data.get('count', 3000))
+    save_pcap = bool(data.get('save_pcap', False))
+    requested_pcap_name = data.get('pcap_filename', '').strip()
+    bpf_filter = data.get('filter', '').strip()
+    
+    # Validation: count must be at least 1000
+    if count < 1000:
+        return jsonify({
+            'success': False,
+            'error': 'The number of packets must be at least 1000 for proper comparison.',
+            'requires_minimum': 1000,
+            'message': 'Please set the packet count to at least 1000 for reliable pattern matching analysis.'
+        }), 400
+    
+    # Use empty filter by default to capture all packets (matches packet_capturer_Version2.py)
+    # Empty filter captures everything without BPF restrictions
+    if not bpf_filter:
+        bpf_filter = ''
+
+    if not interface:
+        return jsonify({'success': False, 'error': 'No interface specified'}), 400
+
+    scapy_iface = get_scapy_interface_for_name(interface)
+
+    ruleset_capturing = True
+    ruleset_stop_requested = False
+    ruleset_captured_packets = []
+    captured = ruleset_captured_packets
+
+    def _cb(pkt):
+        global ruleset_stop_requested
+        captured.append(pkt)
+        # Check if stop was requested
+        if ruleset_stop_requested:
+            raise KeyboardInterrupt("Ruleset stop requested")
+
+    try:
+        sniff_kwargs = {
+            'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
+            'prn': _cb,
+            'count': count,
+            'store': False
+        }
+        if bpf_filter:  # Only add filter if it's not empty
+            sniff_kwargs['filter'] = bpf_filter
+        sniff(**sniff_kwargs)
+    except KeyboardInterrupt:
+        print(f"[DEBUG] Ruleset capture interrupted by user. Packets captured: {len(captured)}")
+    except Exception as e:
+        ruleset_capturing = False
+        return jsonify({'success': False, 'error': f'Capture failed: {e}'}), 500
+    finally:
+        ruleset_capturing = False
+
+    if not captured:
+        return jsonify({'success': False, 'error': 'No packets captured'}), 400
+
+    # Check if user stopped early before reaching 1000 packets
+    if len(captured) < 1000 and ruleset_stop_requested:
+        # Store parameters for confirmation endpoint
+        ruleset_temp_params = {
+            'save_pcap': save_pcap,
+            'requested_pcap_name': requested_pcap_name,
+            'target_count': count
+        }
+        
+        return jsonify({
+            'success': False,
+            'requires_confirmation': True,
+            'packets_captured': len(captured),
+            'target_count': count,
+            'message': f'You captured {len(captured)} packets but targeted {count}. The minimum for reliable analysis is 1000 packets. Do you want to continue with analysis using {len(captured)} packets, or start over?'
+        }), 400
+    
+    # If we get here, we have at least 1000 packets, proceed with analysis
+    return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name)
+
+
+@app.route('/api/confirm-ruleset', methods=['POST'])
+def confirm_ruleset():
+    """Handle user confirmation for ruleset analysis after early stop."""
+    global ruleset_captured_packets, ruleset_temp_params
+    
+    data = request.json or {}
+    proceed = data.get('proceed', False)
+    
+    if not ruleset_captured_packets:
+        return jsonify({'success': False, 'error': 'No captured packets available'}), 400
+    
+    if not proceed:
+        # User chose to start over - clear packets
+        ruleset_captured_packets = []
+        ruleset_temp_params = {}
+        return jsonify({
+            'success': True,
+            'message': 'Experiment cancelled. Ready to start a new capture.'
+        })
+    
+    # User chose to continue - perform analysis with captured packets
+    try:
+        captured = ruleset_captured_packets
+        count = len(captured)  # Use actual captured count
+        save_pcap = ruleset_temp_params.get('save_pcap', False)
+        requested_pcap_name = ruleset_temp_params.get('requested_pcap_name', '')
+        
+        # Clear temp data
+        ruleset_temp_params = {}
+        
+        return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name)
+    except Exception as e:
+        logger.error(f"Error in confirm_ruleset: {e}")
+        return jsonify({'success': False, 'error': f'Analysis failed: {str(e)}'}), 500
 
 
 # ============================================================================
