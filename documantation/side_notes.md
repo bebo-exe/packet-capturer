@@ -55,6 +55,7 @@ some possible solutions? (could not be correct, just some guesses):
 * is it possible to configure npcap' BPF filter to match how lipcap handles it on linux, or is it a fundamental limitation of npcap on windows that cannot be overcome with configuration? #important question for finding a solution for the issue with missing packets on windows.
 * or maybe configure npcap to match how it works for version2, since version2 works correctly on windows, it may be possible to configure npcap in a similar way to how it is configured for version2 to achieve the same results and capture all packets correctly. #important question for finding a solution for the issue with missing packets on windows.
 * more accurately, the filter is probably not applied properly at the capture level where npcap expects it, and the filter string is not actually reaching sniff() the same way as version2, which is why it is not capturing all packets correctly. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
+- [fixed] protocols arent correctly classified. after fixing the capture issue, it was found out that the protocol classification logic was also flawed and needed to be fixed to correctly classify packets based on their actual protocol types rather than just relying on the presence of certain layers or fields in the packet structure. #important note for troubleshooting and finding a solution for the issue with missing packets on windows.
 - [fixed] once going to the broswer after starting app.py, this message is contuined to be printed in the powershell: 
     ```INFO:werkzeug:127.0.0.1 - - [22/Apr/2026 17:53:59] "GET /api/stats HTTP/1.1" 200 -``` which can be annoying, but it is just the flask server logging the request to the /api/stats endpoint, which is expected behavior when the browser makes a request to that endpoint to fetch the stats data. (can it be disabled? maybe, but it is not a critical issue and can be ignored for now) #ingnorable/ minor issue
 
@@ -127,3 +128,27 @@ once the filter issue was resolved, it was then discovered that the manual inter
 - scapy auto-selection - most reliable interface detection on windows
 - conditional filter passing - users can apply filters if needed, but its not forced
 - protocol detection logic - now receives all packet types and correctly classifies them
+
+# as for the second major issue:-
+protocols arent properly calssified, while the capturing itself works fine (verified by the saved pcap files and wireshark analysis) for example tcp was being classified as http/s, and so on. leter on some testing was made to verify the protocol classification:- 
+
+### linux:-
+**test 1** in the browser it did caught 2 tcp packets, but the saved pcap file in wireshark showed 59, the browser caught 94 udp but the pcap showed 100, browser caught 8 dns just as the pcap, browser caught 0 icmp just as the pcap, browser caught 24 arp just as the pcap, browser caught 57 http but the pcap showed none
+
+**test 2** browser caught 2 tcp but in the pcap it showed 75, browser caught 95 udp but the pcap showed 108, browser caught 16 dns just as the pcap, browser caught 0 icmp just as the pcap, browser caught 17 aro but the pcap showed 16, browser caught 73 http but hte pcap showed only 2
+
+**test 3** browser caught 2 tcp but pcap showed 48, browser caught 104 udp but pcap showed 116, browser caught 10 dns just as the pcap, browser caught 16 icmp just as the pcap, browser caught 28 but pcap showed 25, browser caught 53 http but pcap showed 2
+### since macOS uses the same logic as linux, i'd assume the result would be the same as linux
+
+### windows:-
+**test 1** browser caught 2 tcp but pcap showed 182, browser caught 147 udp but pcap showed 148, browser caught 3 dns just as the pcap, browser caught 0 icmp just as the pcap, browser caught 20 arp but pcap showed 19, browser caught 187 http but pcap showed 0
+
+**test 2** browser caught 2 tcp but pcap showed 699, browser caught 48 udp but pcap showed 59, browser caught 0 dns just as the pcap, browser caught 0 icmp just as the pcap, browser caught 18 arp just as the pcap, browser caught 697 http but browser showed 0
+
+**test 3** browser caught 0 tcp but pcap showed 181, browser caught 51 but pcap showed 62, browser caught 11 dns just as the pcap, browser caught 16 icmp just as the pcap, browser caught 16 arp but pcap hsowed 14, browser caught 184 http but pcap showed 0
+
+## in conclusion:- since testing on both linux and windows, it isnt a platform specific issue just as the capturing issue on windows. all packets are correctly captured but not displayed correctly (e.g tcp is displayed as http since http is barely present in the pcap and not tcp) 
+
+- this is becasue the function process_packet() classifies based only on the port numbers, and since tcp and http/s uses the same port number (80/443) without verifying the actual packets payload, the tcp packets gets classified as http/s
+- same logic applies to udp and dns, since both ports uses port 53, all dns packets gets classified as udp
+- the solution was to implement a more robust protocol classification logic that examines the actual packet payload and structure rather than just relying on port numbers, this can be done by checking for specific protocol signatures in the packet payload or by using more advanced packet parsing techniques to accurately identify the protocol type. 
