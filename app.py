@@ -757,29 +757,27 @@ def start_capture_api():
                         print(f"[DEBUG] Exception in packet_callback: {e}")
 
                 print("[DEBUG] About to start sniff...")
-                # Continuous capture loop - check is_capturing flag between sniff cycles
                 
                 try:
                     print(f"[DEBUG] Starting sniff with filter='{bpf_filter}'")
                     
-                    # Single blocking sniff - Npcap on Windows requires filter to be applied once at sniff start
-                    while is_capturing:
-                        try:
-                            sniff_kwargs = {
-                                'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
-                                'prn': packet_callback,
-                                'promisc': True,
-                                'store': False,
-                                'timeout': 5  # Small timeout to check is_capturing flag
-                            }
-                            if bpf_filter:  # Only add filter if it's not empty
-                                sniff_kwargs['filter'] = bpf_filter
-                            sniff(**sniff_kwargs)
-                        except Exception as sniff_ex:
-                            print(f"[DEBUG] Sniff iteration exception: {sniff_ex}")
-                            if not is_capturing:
-                                break
-                            # Continue looping to retry
+                    # Define a stop_filter that checks is_capturing flag on every packet
+                    # This allows immediate termination when stop button is pressed (no delay)
+                    def stop_filter(pkt):
+                        global is_capturing
+                        return not is_capturing  # Return True to stop sniff immediately
+                    
+                    sniff_kwargs = {
+                        'iface': None,  # Use None to let Scapy auto-select the best interface (fixes Windows/Npcap issues)
+                        'prn': packet_callback,
+                        'promisc': True,
+                        'store': False,
+                        'stop_filter': stop_filter  # Check flag on every packet for immediate stop
+                    }
+                    if bpf_filter:  # Only add filter if it's not empty
+                        sniff_kwargs['filter'] = bpf_filter
+                    sniff(**sniff_kwargs)
+                    
                 except KeyboardInterrupt:
                     print("[DEBUG] Sniff interrupted by KeyboardInterrupt")
                 except Exception as e:
