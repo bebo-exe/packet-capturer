@@ -21,12 +21,26 @@ from io import BytesIO
 
 # Ensure scapy is available
 try:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP, Ether, ARP, IPv6, get_if_list, conf
+    from scapy.all import sniff, IP, TCP, UDP, ICMP, Ether, ARP, IPv6, get_if_list, conf, Raw
     # Import PcapWriter and PcapReader for writing and reading pcap files
     from scapy.utils import PcapWriter, PcapReader
-    print("✓ Scapy imported successfully")
+    
+    # Try importing ICMPv6 from scapy.all, fall back to scapy.layers.inet6 if not available
+    try:
+        from scapy.all import ICMPv6
+    except ImportError:
+        try:
+            from scapy.layers.inet6 import ICMPv6
+        except ImportError:
+            # If ICMPv6 can't be imported, create a dummy class
+            class ICMPv6:
+                """Dummy ICMPv6 class for compatibility when not available"""
+                pass
+            logger_warn = "ICMPv6 not available in this Scapy version"
+    
+    print("[OK] Scapy imported successfully")
 except ImportError as e:
-    print(f"✗ ERROR: Scapy not installed: {e}")
+    print(f"[ERROR] Scapy not installed: {e}")
     print("Run: pip install scapy")
     sys.exit(1)
 
@@ -75,7 +89,7 @@ try:
     if platform.system().lower() == 'windows':
         # Enable pcap usage for Windows (npcap/winpcap provides this)
         conf.use_pcap = True
-        print("✓ Scapy configured to use npcap/winpcap")
+        print("[OK] Scapy configured to use npcap/winpcap")
 except Exception as e:
     logger.debug(f"Could not configure pcap: {e}")
     print(f"⚠ pcap configuration warning: {e}")
@@ -727,16 +741,17 @@ def start_capture_api():
                     # Process all packet types including ARP and ICMP
                     print(f"[DEBUG] Inside packet_callback, packets_list size before: {len(packets_list)}")
                     try:
-                        # Write raw packet to pcap if writer is configured
+                        print(f"[DEBUG] Captured packet: {pkt.summary()}")
+                        process_packet(pkt)  # This appends to packets_list
+                        print(f"[DEBUG] After process_packet, packets_list size: {len(packets_list)}")
+                        
+                        # Write to pcap AFTER successful processing
+                        # This ensures packets in browser also appear in pcap file
                         if pcap_writer:
                             try:
                                 pcap_writer.write(pkt)
                             except Exception as e:
                                 logger.debug(f"Failed to write packet to pcap: {e}")
-
-                        print(f"[DEBUG] Captured packet: {pkt.summary()}")
-                        process_packet(pkt)
-                        print(f"[DEBUG] After process_packet, packets_list size: {len(packets_list)}")
                     except Exception as e:
                         logger.debug(f"Error in packet_callback: {e}")
                         print(f"[DEBUG] Exception in packet_callback: {e}")
@@ -1010,14 +1025,149 @@ def export_stats():
 # PACKET PROCESSING
 # ============================================================================
 
+def is_http_like_payload(payload: bytes) -> bool:
+    """
+    Check if payload contains proper HTTP request/response structure.
+    VERY strict: requires starting with valid HTTP method or response line AND CRLF.
+    This eliminates accidental matches in random binary data.
+    """
+    if not payload or len(payload) < 16:
+        return False
+    
+    try:
+        # HTTP MUST start with method or response line
+        payload_sample = payload[:100]
+        
+        # Check for HTTP/1.x or HTTP/2 response at start (strongest indicator)
+        # Examples: "HTTP/1.1 200 OK\r\n", "HTTP/1.0 404\r\n"
+        if payload_sample.startswith(b'HTTP/1.0 ') or payload_sample.startswith(b'HTTP/1.1 ') or payload_sample.startswith(b'HTTP/2 '):
+            # Verify response code is present (3 digits)
+            if len(payload_sample) > 9 and payload_sample[8:11].replace(b' ', b'').isdigit():
+                return True
+        
+        # Check for HTTP request methods at START
+        # Methods MUST be at position 0, followed by space and path
+        http_methods = [b'GET ', b'POST ', b'PUT ', b'DELETE ', b'HEAD ', b'OPTIONS ', b'PATCH ']
+        for method in http_methods:
+            if payload_sample.startswith(method):
+                # Verify there's a space after method (so it's "GET " not "GET" in random data)
+                # and the next chars look like a URL (/ or http://)
+                if len(payload_sample) > len(method):
+                    next_char = payload_sample[len(method):len(method)+1]
+                    if next_char in [b'/', b'h']:  # Path starts with / or http://
+                        return True
+    except Exception as e:
+        logger.debug(f"Error checking HTTP payload: {e}")
+    
+    return False
+
+
+def is_dns_like_payload(payload: bytes) -> bool:
+    """
+    Validate if payload looks like DNS (if we have payload at all).
+    Returns True if:
+    - Payload is empty (will rely on port 53 check)
+    - Payload looks like valid DNS structure
+    
+    This is a lenient check since DNS queries on port 53 should be trusted even with minimal validation.
+    """
+    # If no payload, we'll rely on port 53 for classification
+    if not payload:
+        return True
+    
+    # If payload is too short to be DNS, reject it
+    if len(payload) < 12:
+        return False
+    
+    try:
+        # DNS packets have a 12-byte header
+        # Check basic DNS header structure
+        flags_byte = payload[2]
+        response_flag = flags_byte & 0x80
+        
+        # Extract counts
+        qdcount = (payload[4] << 8) | payload[5]
+        ancount = (payload[6] << 8) | payload[7]
+        nscount = (payload[8] << 8) | payload[9]
+        arcount = (payload[10] << 8) | payload[11]
+        
+        # DNS packets should have reasonable counts
+        # Accept if: response flag set, or queries present
+        if response_flag:
+            # Response packet
+            return True
+        elif qdcount > 0 and qdcount < 100:
+            # Query packet with questions
+            return True
+        else:
+            # Ambiguous - trust port 53 classification
+            return True
+            
+    except Exception as e:
+        logger.debug(f"Error checking DNS payload: {e}")
+        # If we can't parse, trust the port 53 classification
+        return True
+
+
+def is_tls_like_payload(payload: bytes) -> bool:
+    """
+    Check if payload contains TLS/SSL record signatures.
+    TLS records have specific binary structure:
+    - Byte 0: Content Type (0x16=Handshake, 0x17=Application Data, 0x14=Change Cipher Spec, 0x15=Alert, 0x18=Heartbeat)
+    - Bytes 1-2: TLS Version (0x0301=TLS1.0, 0x0302=TLS1.1, 0x0303=TLS1.2/1.3)
+    - Bytes 3-4: Record length
+    Returns True if TLS/SSL record markers are found, False otherwise.
+    """
+    if not payload or len(payload) < 5:
+        return False
+    
+    try:
+        # Check first byte for TLS content type
+        content_type = payload[0]
+        
+        # Valid TLS content types:
+        # 20 (0x14) = Change Cipher Spec
+        # 21 (0x15) = Alert
+        # 22 (0x16) = Handshake
+        # 23 (0x17) = Application Data
+        # 24 (0x18) = Heartbeat
+        valid_content_types = {0x14, 0x15, 0x16, 0x17, 0x18}
+        
+        if content_type not in valid_content_types:
+            return False
+        
+        # Check bytes 1-2 for TLS version
+        # Valid TLS versions:
+        # 0x0301 = TLS 1.0 / SSL 3.0
+        # 0x0302 = TLS 1.1
+        # 0x0303 = TLS 1.2 / TLS 1.3 (uses 0x0303 for compatibility)
+        tls_version = (payload[1] << 8) | payload[2]
+        
+        # Accept known TLS versions (0x0300-0x0304 covers SSL 3.0 through TLS 1.3)
+        if not (0x0300 <= tls_version <= 0x0304):
+            return False
+        
+        # Check bytes 3-4 for reasonable record length (max 16KB)
+        record_length = (payload[3] << 8) | payload[4]
+        
+        # TLS records can be 0-16384 bytes
+        if not (0 <= record_length <= 16384):
+            return False
+        
+        # If we pass all checks, it's likely a TLS record
+        return True
+    
+    except Exception as e:
+        logger.debug(f"Error checking TLS payload: {e}")
+    
+    return False
+
+
 def process_packet(packet):
     """Parse and store packet with enhanced protocol detection and ICMP support"""
     global packets_list
     
     print(f"[DEBUG process_packet] Received packet, packets_list size: {len(packets_list)}, packet summary: {packet.summary()}")
-
-    if len(packets_list) > 1000:
-        packets_list.pop(0)  # Remove oldest
     
     pkt_data = {
         'number': len(packets_list) + 1,
@@ -1058,13 +1208,25 @@ def process_packet(packet):
                 pkt_data['src_port'] = tcp.sport
                 pkt_data['dst_port'] = tcp.dport
                 
-                # Detect HTTPS (port 443)
-                if tcp.dport == 443 or tcp.sport == 443:
+                # Extract raw payload for HTTP detection
+                payload = b""
+                if packet.haslayer(Raw):
+                    try:
+                        payload = packet[Raw].load
+                    except Exception as e:
+                        logger.debug(f"Could not extract payload: {e}")
+                
+                # Detect HTTP/HTTPS based on port AND payload inspection
+                is_http_payload = is_http_like_payload(payload)
+                is_tls_payload = is_tls_like_payload(payload)
+                
+                # HTTPS (port 443 + TLS payload required, HTTP payload optional)
+                if (tcp.dport == 443 or tcp.sport == 443) and is_tls_payload:
                     pkt_data['protocol'] = 'HTTPS'
-                # Detect HTTP (port 80)
-                elif tcp.dport == 80 or tcp.sport == 80:
+                # HTTP (port 80 + HTTP payload required - must have proper HTTP structure)
+                elif (tcp.dport == 80 or tcp.sport == 80) and is_http_payload:
                     pkt_data['protocol'] = 'HTTP'
-                # Generic TCP
+                # Generic TCP (no HTTP/TLS payload detected, or non-standard ports)
                 else:
                     pkt_data['protocol'] = 'TCP'
                 
@@ -1078,10 +1240,9 @@ def process_packet(packet):
                 pkt_data['src_port'] = udp.sport
                 pkt_data['dst_port'] = udp.dport
                 
-                # Detect DNS (port 53)
+                # Check for DNS first (port 53 is a strong indicator)
                 if udp.dport == 53 or udp.sport == 53:
                     pkt_data['protocol'] = 'DNS'
-                # Generic UDP
                 else:
                     pkt_data['protocol'] = 'UDP'
                 
@@ -1124,6 +1285,117 @@ def process_packet(packet):
             else:
                 pkt_data['protocol'] = 'IP'
                 print("[DEBUG] IP packet (no TCP/UDP/ICMP)")
+        
+        # IPv6 layer (similar to IP but for IPv6)
+        elif packet.haslayer(IPv6):
+            print("[DEBUG] Found IPv6 layer")
+            ipv6 = packet[IPv6]
+            pkt_data['src_ip'] = ipv6.src
+            pkt_data['dst_ip'] = ipv6.dst
+            
+            # TCP layer (over IPv6)
+            if packet.haslayer(TCP):
+                print("[DEBUG] Found TCP layer over IPv6")
+                tcp = packet[TCP]
+                pkt_data['src_port'] = tcp.sport
+                pkt_data['dst_port'] = tcp.dport
+                
+                # Extract raw payload for HTTP detection
+                payload = b""
+                if packet.haslayer(Raw):
+                    try:
+                        payload = packet[Raw].load
+                    except Exception as e:
+                        logger.debug(f"Could not extract payload: {e}")
+                
+                # Detect HTTP/HTTPS based on port AND payload inspection
+                is_http_payload = is_http_like_payload(payload)
+                is_tls_payload = is_tls_like_payload(payload)
+                
+                # HTTPS (port 443 + TLS payload required, HTTP payload optional)
+                if (tcp.dport == 443 or tcp.sport == 443) and is_tls_payload:
+                    pkt_data['protocol'] = 'HTTPS'
+                # HTTP (port 80 + HTTP payload required - must have proper HTTP structure)
+                elif (tcp.dport == 80 or tcp.sport == 80) and is_http_payload:
+                    pkt_data['protocol'] = 'HTTP'
+                # Generic TCP (no HTTP/TLS payload detected, or non-standard ports)
+                else:
+                    pkt_data['protocol'] = 'TCP'
+                
+                pkt_data['info'] = f":{tcp.sport} → :{tcp.dport}"
+                print(f"[DEBUG] TCP packet stored: {pkt_data['protocol']} {pkt_data['src_ip']}:{tcp.sport} -> {pkt_data['dst_ip']}:{tcp.dport}")
+            
+            # UDP layer (over IPv6)
+            elif packet.haslayer(UDP):
+                print("[DEBUG] Found UDP layer over IPv6")
+                udp = packet[UDP]
+                pkt_data['src_port'] = udp.sport
+                pkt_data['dst_port'] = udp.dport
+                
+                # Extract raw payload for DNS detection
+                payload = b""
+                if packet.haslayer(Raw):
+                    try:
+                        payload = packet[Raw].load
+                    except Exception as e:
+                        logger.debug(f"Could not extract payload: {e}")
+                
+                # Detect DNS based on port AND payload inspection
+                is_dns_payload = is_dns_like_payload(payload)
+                
+                # DNS (port 53 + DNS payload markers)
+                if (udp.dport == 53 or udp.sport == 53) and is_dns_payload:
+                    pkt_data['protocol'] = 'DNS'
+                # Generic UDP (no DNS markers, or non-port-53)
+                else:
+                    pkt_data['protocol'] = 'UDP'
+                
+                pkt_data['info'] = f":{udp.sport} → :{udp.dport}"
+                print(f"[DEBUG] UDP packet stored: {pkt_data['protocol']} {pkt_data['src_ip']}:{udp.sport} -> {pkt_data['dst_ip']}:{udp.dport}")
+            
+            # ICMPv6 layer (over IPv6) - only check if ICMPv6 is available
+            elif ICMPv6 and hasattr(ICMPv6, '__bases__') and packet.haslayer(ICMPv6):
+                try:
+                    print("[DEBUG] Found ICMPv6 layer")
+                    icmpv6 = packet[ICMPv6]
+                    pkt_data['protocol'] = 'ICMPv6'
+                    
+                    # Extract ICMPv6 type
+                    icmpv6_type = icmpv6.type
+                    
+                    # Map ICMPv6 types to human-readable names
+                    icmpv6_type_names = {
+                        1: 'Destination Unreachable',
+                        2: 'Packet Too Big',
+                        3: 'Time Exceeded',
+                        4: 'Parameter Problem',
+                        128: 'Echo Request (Ping)',
+                        129: 'Echo Reply',
+                        130: 'Multicast Listener Query',
+                        131: 'Multicast Listener Report',
+                        132: 'Multicast Listener Done',
+                        135: 'Neighbor Solicitation',
+                        136: 'Neighbor Advertisement',
+                        137: 'Router Solicitation',
+                        138: 'Router Advertisement',
+                        139: 'Redirect'
+                    }
+                    
+                    icmpv6_type_name = icmpv6_type_names.get(icmpv6_type, f'Type {icmpv6_type}')
+                    
+                    # Build info string with code if available
+                    if hasattr(icmpv6, 'code'):
+                        pkt_data['info'] = f"{icmpv6_type_name} (Code: {icmpv6.code})"
+                    else:
+                        pkt_data['info'] = icmpv6_type_name
+                    print(f"[DEBUG] ICMPv6 packet stored: {pkt_data['info']}")
+                except Exception as e:
+                    logger.debug(f"Error processing ICMPv6: {e}")
+                    pkt_data['protocol'] = 'IPv6'
+            
+            else:
+                pkt_data['protocol'] = 'IPv6'
+                print("[DEBUG] IPv6 packet (no TCP/UDP/ICMPv6)")
         
         # Ethernet without IP
         elif packet.haslayer(Ether):
@@ -1206,52 +1478,118 @@ def kmp_search(text: bytes, pattern: bytes) -> bool:
 # Temporary storage for ruleset parameters during confirmation flow
 ruleset_temp_params = {}
 
-def _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name):
-    """Perform the actual ruleset analysis on captured packets."""
-    # Prepare bytes list
-    bytes_list = [bytes(p) for p in captured]
+def _run_algorithms_parallel(bytes_list, pattern):
+    """Run all three search algorithms in parallel using threads.
     
-    # Find a pattern that appears in multiple packets
+    Returns a dict with the same structure as sequential execution:
+    {'quick': {'matches': int, 'time_s': float}, ...}
+    """
+    results = {}
+    
+    def run_quick():
+        start = time.perf_counter()
+        quick_matches = sum(1 for b in bytes_list if pattern in b)
+        results['quick'] = {'matches': quick_matches, 'time_s': time.perf_counter() - start}
+    
+    def run_bm():
+        start = time.perf_counter()
+        bm_matches = sum(1 for b in bytes_list if boyer_moore_search(b, pattern))
+        results['boyer_moore'] = {'matches': bm_matches, 'time_s': time.perf_counter() - start}
+    
+    def run_kmp():
+        start = time.perf_counter()
+        kmp_matches = sum(1 for b in bytes_list if kmp_search(b, pattern))
+        results['kmp'] = {'matches': kmp_matches, 'time_s': time.perf_counter() - start}
+    
+    # Create and start threads
+    t1 = threading.Thread(target=run_quick, daemon=True)
+    t2 = threading.Thread(target=run_bm, daemon=True)
+    t3 = threading.Thread(target=run_kmp, daemon=True)
+    
+    t1.start()
+    t2.start()
+    t3.start()
+    
+    # Wait for all threads to complete
+    t1.join()
+    t2.join()
+    t3.join()
+    
+    return results
+
+def _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name, mode='sequential'):
+    """Perform the actual ruleset analysis on captured packets.
+    
+    Args:
+        captured: List of captured packets
+        count: Number of packets captured
+        save_pcap: Whether to save pcap file
+        requested_pcap_name: Name for pcap file
+        mode: 'sequential' or 'parallel' execution mode
+    """
+    # Extract PAYLOADS ONLY (not entire packets with headers)
+    # This gives more realistic match counts since headers vary per packet
+    payload_list = []
+    for pkt in captured:
+        try:
+            # Try to extract the Raw layer (application data)
+            if pkt.haslayer(Raw):
+                payload = pkt[Raw].load
+            else:
+                payload = b''
+        except Exception:
+            payload = b''
+        
+        # Only include non-empty payloads
+        if payload:
+            payload_list.append(payload)
+    
+    # If we have no payloads with data, use entire packets as fallback
+    if not payload_list:
+        payload_list = [bytes(p) for p in captured]
+    
+    # Find a pattern that appears in multiple packet payloads
     # This ensures realistic algorithm comparison with meaningful match counts
     pattern = None
-    pattern_summary = "Found repeating pattern"
     
-    # Strategy: Look for repeating byte sequences across packets
+    # Strategy: Look for repeating byte sequences across payloads
     # Start with medium-sized patterns and work down
     for pattern_size in [32, 24, 16, 12]:
         if pattern is not None:
             break
-        # Try different offsets in the first packet
-        first_pkt = bytes_list[0]
-        if len(first_pkt) < pattern_size + 10:
+        
+        # Try different offsets in the first payload
+        if not payload_list or len(payload_list[0]) < pattern_size:
             continue
         
-        # Sample from middle of packet (skip headers)
-        offset_start = min(40, len(first_pkt) // 3)
-        for offset in range(offset_start, min(offset_start + 20, len(first_pkt) - pattern_size)):
-            candidate = first_pkt[offset:offset + pattern_size]
-            # Count how many packets contain this pattern
-            matches = sum(1 for b in bytes_list if candidate in b)
+        first_payload = payload_list[0]
+        
+        # Sample from the payload (no need to skip headers, this is pure data)
+        max_offset = min(len(first_payload) - pattern_size, 50)
+        for offset in range(0, max_offset, 5):
+            candidate = first_payload[offset:offset + pattern_size]
+            # Count how many payloads contain this pattern
+            matches = sum(1 for p in payload_list if candidate in p)
             if matches >= 2:  # Found a pattern that repeats!
                 pattern = candidate
                 break
     
-    # Fallback: If no repeating pattern found, extract a small substring
-    # from multiple packets and use the most common one
+    # Fallback: If no repeating pattern found, extract from multiple payloads
     if pattern is None:
         pattern_candidates = []
-        for pkt in bytes_list[:min(5, len(bytes_list))]:  # Check first 5 packets
-            if len(pkt) > 50:
+        for payload in payload_list[:min(5, len(payload_list))]:
+            if len(payload) > 16:
                 # Extract 16-byte patterns from various offsets
-                for offset in range(40, min(len(pkt) - 16, 100), 20):
-                    pattern_candidates.append(pkt[offset:offset + 16])
+                max_offset = min(len(payload) - 16, 50)
+                for offset in range(0, max_offset, 10):
+                    pattern_candidates.append(payload[offset:offset + 16])
         
         if pattern_candidates:
             # Use the first candidate (simple approach)
             pattern = pattern_candidates[0]
         else:
-            # Final fallback: use first 32 bytes of first packet
-            pattern = bytes_list[0][:32] if len(bytes_list[0]) >= 32 else bytes_list[0][:16]
+            # Final fallback: use first bytes of first payload
+            pattern = payload_list[0][:32] if len(payload_list[0]) >= 32 else payload_list[0][:16]
     
     # Choose a random packet for display purposes
     chosen_idx = random.randrange(len(captured))
@@ -1276,23 +1614,29 @@ def _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name):
 
     results = {}
 
-    # Quick (python 'in')
-    start = time.perf_counter()
-    quick_matches = sum(1 for b in bytes_list if pattern in b)
-    t_quick = time.perf_counter() - start
-    results['quick'] = {'matches': quick_matches, 'time_s': t_quick}
+    # Choose execution mode: sequential or parallel
+    if mode.lower() == 'parallel':
+        # Run all algorithms in parallel (on payloads only)
+        results = _run_algorithms_parallel(payload_list, pattern)
+    else:
+        # Run algorithms sequentially (default)
+        # Quick (python 'in')
+        start = time.perf_counter()
+        quick_matches = sum(1 for p in payload_list if pattern in p)
+        t_quick = time.perf_counter() - start
+        results['quick'] = {'matches': quick_matches, 'time_s': t_quick}
 
-    # Boyer-Moore
-    start = time.perf_counter()
-    bm_matches = sum(1 for b in bytes_list if boyer_moore_search(b, pattern))
-    t_bm = time.perf_counter() - start
-    results['boyer_moore'] = {'matches': bm_matches, 'time_s': t_bm}
+        # Boyer-Moore
+        start = time.perf_counter()
+        bm_matches = sum(1 for p in payload_list if boyer_moore_search(p, pattern))
+        t_bm = time.perf_counter() - start
+        results['boyer_moore'] = {'matches': bm_matches, 'time_s': t_bm}
 
-    # KMP (as Aho substitute)
-    start = time.perf_counter()
-    kmp_matches = sum(1 for b in bytes_list if kmp_search(b, pattern))
-    t_kmp = time.perf_counter() - start
-    results['kmp'] = {'matches': kmp_matches, 'time_s': t_kmp}
+        # KMP (as Aho substitute)
+        start = time.perf_counter()
+        kmp_matches = sum(1 for p in payload_list if kmp_search(p, pattern))
+        t_kmp = time.perf_counter() - start
+        results['kmp'] = {'matches': kmp_matches, 'time_s': t_kmp}
 
     return jsonify({
         'success': True,
@@ -1327,6 +1671,11 @@ def run_ruleset():
     save_pcap = bool(data.get('save_pcap', False))
     requested_pcap_name = data.get('pcap_filename', '').strip()
     bpf_filter = data.get('filter', '').strip()
+    mode = data.get('mode', 'sequential').strip().lower()  # Accept mode parameter
+    
+    # Validate mode parameter
+    if mode not in ('sequential', 'parallel'):
+        mode = 'sequential'  # Default to sequential if invalid
     
     # Validation: count must be at least 1000
     if count < 1000:
@@ -1386,7 +1735,8 @@ def run_ruleset():
         ruleset_temp_params = {
             'save_pcap': save_pcap,
             'requested_pcap_name': requested_pcap_name,
-            'target_count': count
+            'target_count': count,
+            'mode': mode
         }
         
         return jsonify({
@@ -1398,7 +1748,7 @@ def run_ruleset():
         }), 400
     
     # If we get here, we have at least 1000 packets, proceed with analysis
-    return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name)
+    return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name, mode)
 
 
 @app.route('/api/confirm-ruleset', methods=['POST'])
@@ -1427,11 +1777,12 @@ def confirm_ruleset():
         count = len(captured)  # Use actual captured count
         save_pcap = ruleset_temp_params.get('save_pcap', False)
         requested_pcap_name = ruleset_temp_params.get('requested_pcap_name', '')
+        mode = ruleset_temp_params.get('mode', 'sequential')
         
         # Clear temp data
         ruleset_temp_params = {}
         
-        return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name)
+        return _perform_ruleset_analysis(captured, count, save_pcap, requested_pcap_name, mode)
     except Exception as e:
         logger.error(f"Error in confirm_ruleset: {e}")
         return jsonify({'success': False, 'error': f'Analysis failed: {str(e)}'}), 500
@@ -1448,7 +1799,7 @@ if __name__ == '__main__':
     
     # Verify npcap installation on Windows
     if platform.system().lower() == 'windows':
-        print("\n🔍 Checking npcap installation...")
+        print("\n[INFO] Checking npcap installation...")
         npcap_installed = False
         npcap_paths = [
             r"C:\Windows\System32\npcap\wpcap.dll",
@@ -1458,32 +1809,32 @@ if __name__ == '__main__':
         
         for dll_path in npcap_paths:
             if os.path.exists(dll_path):
-                print(f"✓ npcap found at: {dll_path}")
+                print(f"[OK] npcap found at: {dll_path}")
                 npcap_installed = True
                 break
         
         if not npcap_installed:
-            print("✗ ERROR: npcap is not installed!")
-            print("\n📥 To install npcap:")
+            print("[ERROR] npcap is not installed!")
+            print("\n[INFO] To install npcap:")
             print("   1. Download from: https://nmap.org/npcap/")
             print("   2. Run the installer (npcap-1.x.x.exe)")
             print("   3. Choose 'Install npcap in WinPcap API-compatible mode' during installation")
             print("   4. Restart this application")
-            print("\n⚠️  Packet capture will not work without npcap!")
+            print("\n[WARN] Packet capture will not work without npcap!")
     
     # Check interfaces
     try:
         ifaces = get_if_list()
-        print(f"\n✓ Found {len(ifaces)} network interface(s)")
+        print(f"\n[OK] Found {len(ifaces)} network interface(s)")
         if len(ifaces) > 0:
             print(f"  First interface: {ifaces[0]}")
     except Exception as e:
-        print(f"\n⚠ Could not detect interfaces: {e}")
+        print(f"\n[WARN] Could not detect interfaces: {e}")
     
-    print("\n📡 Starting Flask server...")
+    print("\n[INFO] Starting Flask server...")
     print("   URL: http://localhost:5000")
     print("   API: http://localhost:5000/api/test")
-    print("\n💡 TIPS:")
+    print("\n[INFO] TIPS:")
     print("   - Press CTRL+C to stop")
     print("   - Must run as Administrator (Windows) or with sudo (Linux)")
     print("   - Open browser to http://localhost:5000")
