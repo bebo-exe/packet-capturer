@@ -593,6 +593,7 @@
                             <option value="HTTP">HTTP</option>
                             <option value="HTTPS">HTTPS</option>
                             <option value="DNS">DNS</option>
+                            <option value="Other">Other</option>
                         </select>
                     </div>
                     <button onclick="applyFilters()" style="width: 100%; margin-top: 10px;">🔍 Apply Filter</button>
@@ -622,7 +623,7 @@
                 <h3 style="margin: 0;">Ruleset Experiment (Algorithm Comparison)</h3>
                 <button id="ruleset-info-btn" class="info-btn" onclick="showRulesetInfo()" title="Learn how the ruleset system works" style="padding: 8px 12px; font-size: 1em;">ℹ️ How it works</button>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; align-items: flex-end;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; align-items: flex-end;">
                 <div class="control-group">
                     <label for="ruleset-interface">Interface</label>
                     <select id="ruleset-interface">
@@ -636,6 +637,16 @@
                 <div class="control-group">
                     <label for="ruleset-save">Save PCAP</label>
                     <input type="checkbox" id="ruleset-save">
+                </div>
+            </div>
+            <!-- Execution Mode Selector -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 15px; align-items: flex-end;">
+                <div style="grid-column: 1 / 3;">
+                    <label style="font-size: 0.85em; color: #00ff88; margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; display: block;">Execution Mode</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <button id="mode-sequential-btn" onclick="selectRulesetMode('sequential')" title="Run algorithms one after another" style="padding: 10px; background: #16213e; border: 2px solid #00ff88; color: #00ff88; border-radius: 4px; cursor: pointer; font-weight: 600; box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);">⟲ Sequential</button>
+                        <button id="mode-parallel-btn" onclick="selectRulesetMode('parallel')" title="Run algorithms simultaneously" style="padding: 10px; background: #16213e; border: 2px solid #555; color: #888; border-radius: 4px; cursor: pointer; font-weight: 600;">⇄ Parallel</button>
+                    </div>
                 </div>
                 <button id="run-ruleset-btn" onclick="runRulesetExperiment()" style="justify-self: stretch;">▶ Run Experiment</button>
                 <button id="stop-ruleset-btn" onclick="stopRulesetExperiment()" style="justify-self: stretch; display: none; background-color: #ff4444; border-color: #ff6666;">⏹ Stop Experiment</button>
@@ -673,7 +684,7 @@
                 <p><strong>The Ruleset Experiment is an advanced feature for comparing string search algorithms.</strong></p>
                 
                 <h3>What Does It Do?</h3>
-                <p>The system captures network packets and uses one randomly selected packet as a search pattern. It then compares three different algorithms to find how many times this pattern appears in all captured packets.</p>
+                <p>The system captures network packets and uses one randomly selected packet and uses its payload as a search pattern. It then compares three different algorithms to find how many times this pattern appears in all captured packets.</p>
                 
                 <h3>How It Works:</h3>
                 <ol>
@@ -716,6 +727,12 @@
                 
                 <h3>Stop Button:</h3>
                 <p>The <strong>⏹ Stop Experiment</strong> button appears during capture and allows you to halt the experiment before reaching the target packet count. If you stop before capturing 1000 packets, you'll be warned but can continue anyway.</p>
+           
+                <h3>Sequential Execution:</h3>
+                <p> Each algorithm is run one after the other, showing the results for each in turn. </p>
+
+                <h3>Parallel Execution:</h3>
+                <p> All algorithms run simultaneously, allowing you to compare their performance in real-time. </p>
             </div>
         </div>
     </div>
@@ -1136,6 +1153,35 @@
             }
         }
         
+        // Ruleset execution mode tracking
+        let rulesetMode = 'sequential';
+        
+        function selectRulesetMode(mode) {
+            rulesetMode = mode;
+            
+            // Update button styling
+            const sequentialBtn = document.getElementById('mode-sequential-btn');
+            const parallelBtn = document.getElementById('mode-parallel-btn');
+            
+            if (mode === 'sequential') {
+                sequentialBtn.style.borderColor = '#00ff88';
+                sequentialBtn.style.color = '#00ff88';
+                sequentialBtn.style.boxShadow = '0 0 8px rgba(0, 255, 136, 0.5)';
+                
+                parallelBtn.style.borderColor = '#555';
+                parallelBtn.style.color = '#888';
+                parallelBtn.style.boxShadow = 'none';
+            } else {
+                parallelBtn.style.borderColor = '#00ff88';
+                parallelBtn.style.color = '#00ff88';
+                parallelBtn.style.boxShadow = '0 0 8px rgba(0, 255, 136, 0.5)';
+                
+                sequentialBtn.style.borderColor = '#555';
+                sequentialBtn.style.color = '#888';
+                sequentialBtn.style.boxShadow = 'none';
+            }
+        }
+        
         let rulesetProgressInterval = null;
         
         // Override the original runRulesetExperiment function to add abort control
@@ -1193,7 +1239,8 @@
                         interface: interface_val,
                         count: count,
                         save_pcap: savePcap,
-                        pcap_filename: savePcap ? `ruleset_experiment_${Date.now()}.pcap` : ''
+                        pcap_filename: savePcap ? `ruleset_experiment_${Date.now()}.pcap` : '',
+                        mode: rulesetMode
                     }),
                     signal: rulesetAbortController.signal
                 });
