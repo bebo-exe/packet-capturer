@@ -229,7 +229,7 @@ Navigate to: **`http://localhost:5000`**
 📡 Starting Flask server...
    URL: http://localhost:5000
    Running on http://127.0.0.1:5000
-   Running on http://192.168.100.15:5000  ← Use this to access from other computers
+   Running on http://<IP_ADDRESS>:5000  ← Use this to access from other computers
 ```
 
 **From another computer on your network:**
