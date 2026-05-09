@@ -2,7 +2,7 @@
 
 A professional-grade packet capture and analysis platform with real-time packet visualization, filtering, statistics, and advanced algorithm comparison capabilities. Similar to Wireshark but with a web-based interface. documantation is left in case of exploring problems and errors and how they were solved ^^
 
-**please be aware that this project may not be 100% accurate, and it may get some bugs in the capture process**
+**please be aware that this project may not be 100% accurate, and it may encounter some bugs in the capture process**
 
 ## Features
 
