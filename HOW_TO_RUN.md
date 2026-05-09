@@ -134,11 +134,6 @@ chmod +x run.sh
 ./run.sh
 ```
 
-**Option C: Without Virtual Environment**
-```bash
-sudo python3 app.py
-```
-
 You should see:
 ```
 ✓ Scapy imported successfully
@@ -211,12 +206,6 @@ chmod +x run.sh
 # Run the app
 ./run.sh
 ```
-
-**Option C: Without Virtual Environment**
-```bash
-sudo python3 app.py
-```
-
 You should see:
 ```
 ✓ Scapy imported successfully
