@@ -200,20 +200,6 @@ sudo python app.py
 | "Permission denied" | Capture requires elevated privileges | Run with admin/sudo |
 | "This site can't be reached" | Flask not responding | Check Flask logs in terminal |
 
-## Verify Setup
-
-Run the verification script:
-
-```bash
-python verify_setup.py
-```
-
-This will check:
-- Python version ✓
-- Package installation ✓
-- Network interfaces ✓
-- File structure ✓
-
 ## Success Indicator
 
 When everything works, you should see:
