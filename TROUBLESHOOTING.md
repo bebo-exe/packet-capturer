@@ -241,32 +241,6 @@ Provide these when reporting issues!
 
 ## ❌ Ruleset Experiment Issues
 
-### Problem: Mode buttons (Sequential/Parallel) not visible
-
-After 1000+ packets are captured, the ruleset experiment section should appear with mode selection buttons. If you don't see the buttons:
-
-**Check 1: Are you at 1000+ packets?**
-- Look at the top of the page where packet count is displayed
-- Ruleset only activates at 1000+ packets
-- Capture more packets if below this threshold
-
-**Check 2: Reload the page**
-- Sometimes the page cache needs refreshing
-- Press `F5` or `Ctrl+Shift+R` (hard refresh)
-
-**Check 3: Check browser console for JavaScript errors**
-- Press `F12` to open DevTools
-- Look at Console tab for errors
-- Common error: "selectRulesetMode is not defined" → page hasn't loaded JavaScript properly
-- Solution: Hard refresh the page
-
-**Check 4: Check Flask logs**
-- Look at terminal output where Flask is running
-- Look for errors like `500 Internal Server Error` when ruleset is triggered
-- Check the `packet_capture.log` file for details
-
----
-
 ### Problem: "No pattern found" in ruleset results
 
 The pattern extraction failed, usually because packets have no usable payload data.
@@ -315,32 +289,6 @@ The pattern was found, but matches are unrealistically low.
    - Look at "Frame Data" field
    - If you see mostly control packets (ARP, SYN, FIN), pattern will be scarce
    - Wait for packets with actual data (HTTP, DNS responses)
-
----
-
-### Problem: Parallel mode is slower than Sequential mode
-
-Parallel mode should be faster (or at least the same speed), running all algorithms at once.
-
-**Possible causes:**
-
-1. **Low packet count (< 100)**
-   - With very small datasets, threading overhead can exceed benefit
-   - Solution: Use 1000+ packets to see actual parallelization advantage
-
-2. **Very fast pattern matching**
-   - If pattern is found immediately, sequential may finish before threads launch
-   - This is normal for small patterns or small datasets
-   - Solution: Try with larger packet counts for measurable difference
-
-3. **System load**
-   - If your system is already busy, parallel threads compete for CPU
-   - Close other applications and try again
-
-**Expected behavior:**
-- Sequential with 2000+ packets: ~300-500ms total
-- Parallel with 2000+ packets: ~150-200ms total (roughly split by 3)
-- Ratio: Parallel should be 50-70% of Sequential time
 
 ---
 
