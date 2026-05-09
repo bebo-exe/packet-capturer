@@ -136,7 +136,6 @@ pip install --upgrade scapy
 2. Click "Console" tab
 3. Look for error messages like:
    - `Failed to fetch` → Backend not running
-   - `CORS error` → Backend CORS issue (should be fixed now)
    - `net::ERR_CONNECTION_REFUSED` → Port is blocked
    - `net::ERR_NAME_NOT_RESOLVED` → Wrong URL
 
