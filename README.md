@@ -2,6 +2,8 @@
 
 A professional-grade packet capture and analysis platform with real-time packet visualization, filtering, statistics, and advanced algorithm comparison capabilities. Similar to Wireshark but with a web-based interface. documantation is left in case of exploring problems and errors and how were they solved ^^
 
+**please be aware that this project may not be 100% accurate, and it may get some bugs in the capture process**
+
 ## Features
 
 ### Core Capture Features
@@ -115,5 +117,3 @@ UDP seperation is simpler, its just port-based:
   * UDP: other UDP traffic (53, 5353, etc)
 ### other protocols:-
 ICMP, ICMPv6, ARP, IP, IPv6 and ethernet are always classified as is, they are not split into subcategories. if a packet has an IP header but no transport layer, it will be classified as "IP" or "IPv6" in the pie chart, but still counted as TCP/UDP in the main stats. this is because the main stats classify by highest detected layer, while the pie chart classifies by specific protocol signatures. this can lead to some packets being counted in multiple categories, but it reflects the reality of packet structures and capture limitations.
-
-**please be aware that this project may not be 100% accurate, and it may get some bugs in the capture process**
