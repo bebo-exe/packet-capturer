@@ -220,7 +220,7 @@ You should see:
 Navigate to: **`http://localhost:5000`**
 
 ---
-s
+
 ## Access from Other Computers on Network
 
 **All Platforms**: When Flask starts, it displays all available IP addresses:
