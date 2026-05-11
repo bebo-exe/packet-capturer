@@ -51,10 +51,10 @@ python app.py
 ### Linux/macOS
 ```bash
 # Activate virtual environment
-source venv/bin/activate
+source .venv/bin/activate
 
 # Run application
-python app.py
+Sudo path/to/packet-capturer-main/.venv/bin/python app.py
 
 # Open browser to http://localhost:5000
 ```
