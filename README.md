@@ -32,7 +32,6 @@ A professional-grade packet capture and analysis platform with real-time packet 
   - **Sequential Mode**: Algorithms run one after another (baseline performance)
   - **Parallel Mode**: All algorithms run simultaneously (demonstrates parallelization speedup)
   - Pattern matching searches application layer payloads only (realistic data)
-  - Apply rulesets as filters or save for later use
 - **Session Management**: Clear captured packets and start fresh analysis
 - **Execution Modes**: Toggle between sequential and parallel algorithm execution for performance comparison
 
