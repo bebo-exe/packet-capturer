@@ -12,12 +12,12 @@ A professional-grade packet capture and analysis platform with real-time packet 
 - **Live Statistics**: Real-time display of captured packet count and per-protocol statistics
 - **Protocol Support**: TCP, UDP, ARP, ICMP, HTTP, HTTPS (TLS)
 - **Packet Details**: View number, source, destination, and detailed packet information
-- **Cross-Platform**: both tested and verified working on the big three
+- **Cross-Platform**: both tested and verified working on the big three!
 
 ### Analysis & Filtering
 - **Protocol Filtering**: Filter packets by protocol (TCP, UDP, ARP, ICMP, HTTP/HTTPS)
 - **Advanced Search**: Filter by source IP, destination IP, port numbers
-- **Real-time Pie Chart**: Visual distribution of captured packets by protocol, source, or destination
+- **Real-time Pie Chart**: Visual distribution of captured packets by protocol
 - **Dynamic Statistics**: Real-time statistics including most common protocols, sources, and destinations
 
 ### File Management
