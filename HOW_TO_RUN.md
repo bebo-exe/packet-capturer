@@ -36,7 +36,7 @@ winpcap is not installed
 ```powershell
 # Open PowerShell as Administrator
 # Navigate to project folder
-cd C:\path\to\packet-capturer-main
+cd C:\path\to\packet-capturer
 
 # Create virtual environment
 python -m venv .venv
@@ -102,7 +102,7 @@ sudo pacman -S libpcap python3 python-pip
 ### Step 2: Create Virtual Environment (Recommended)
 
 ```bash
-cd /path/to/packet-capturer-main
+cd /path/to/packet-capturer
 
 # Create virtual environment
 python3 -m venv .venv
@@ -119,10 +119,10 @@ pip install -r requirements.txt
 **Option A: Using Full Path (Recommended)**
 ```bash
 # This avoids PATH issues with sudo
-sudo /path/to/packet-capturer-main/.venv/bin/python app.py
+sudo /path/to/packet-capturer/.venv/bin/python app.py
 
 # Example:
-sudo /home/username/Desktop/packet-capturer-main/.venv/bin/python app.py
+sudo /home/username/Desktop/packet-capturer/.venv/bin/python app.py
 ```
 
 **Option B: Using Launcher Script**
@@ -175,7 +175,7 @@ python3 --version
 ### Step 2: Create Virtual Environment (Recommended)
 
 ```bash
-cd /path/to/packet-capturer-main
+cd /path/to/packet-capturer
 
 # Create virtual environment
 python3 -m venv .venv
@@ -192,10 +192,10 @@ pip install -r requirements.txt
 **Option A: Using Full Path (Recommended)**
 ```bash
 # This avoids PATH issues with sudo
-sudo /path/to/packet-capturer-main/.venv/bin/python app.py
+sudo /path/to/packet-capturer/.venv/bin/python app.py
 
 # Example:
-sudo /Users/username/Desktop/packet-capturer-main/.venv/bin/python app.py
+sudo /Users/username/Desktop/packet-capturer/.venv/bin/python app.py
 ```
 
 **Option B: Using Launcher Script**
