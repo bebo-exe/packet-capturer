@@ -64,7 +64,7 @@ The most common cause is **not running with administrator privileges**.
 1. Press `Win + R`
 2. Type: `cmd`
 3. Press `Ctrl + Shift + Enter` (instead of just Enter)
-4. Navigate to your folder: `cd C:\path\to\packet-capturer-main`
+4. Navigate to your folder: `cd C:\path\to\`
 5. Activate venv: `.\.venv\Scripts\activate`
 6. Run: `python app.py`
 
@@ -78,7 +78,7 @@ The most common cause is **not running with administrator privileges**.
 Create a file named `run_app.bat`:
 ```batch
 @echo off
-cd /d C:\path\to\packet-capturer-main
+cd /d C:\path\to\packet-capturer
 .\.venv\Scripts\activate.bat
 python app.py
 pause
@@ -89,7 +89,7 @@ Right-click → Run as administrator
 ## Step 3: macOS/Linux Users - Use sudo
 
 ```bash
-cd ~/path/to/packet-capturer-main
+cd ~/path/to/packet-capturer
 source venv/bin/activate  # if using venv
 sudo python app.py
 ```
