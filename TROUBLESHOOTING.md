@@ -64,7 +64,7 @@ The most common cause is **not running with administrator privileges**.
 1. Press `Win + R`
 2. Type: `cmd`
 3. Press `Ctrl + Shift + Enter` (instead of just Enter)
-4. Navigate to your folder: `cd C:\path\to\`
+4. Navigate to your folder: `cd C:\path\to\packet-capturer`
 5. Activate venv: `.\.venv\Scripts\activate`
 6. Run: `python app.py`
 
