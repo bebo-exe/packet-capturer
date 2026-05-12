@@ -55,7 +55,7 @@ python app.py
 source .venv/bin/activate
 
 # Run application
-Sudo path/to/packet-capturer-main/.venv/bin/python app.py
+Sudo path/to/packet-capturer/.venv/bin/python app.py
 
 # Open browser to http://localhost:5000
 ```
